@@ -99,23 +99,20 @@ This is the easiest way to get started. It will set up PostgreSQL and the API au
    cd backend
    ```
 
-2. **Copy environment variables:**
+2. **Start services:**
    ```bash
-   cp .env.example .env
+   docker compose up
    ```
 
-3. **Start services:**
-   ```bash
-   docker-compose up
-   ```
+   **Note:** No need to create a `.env` file! All environment variables are configured in `docker-compose.yml`.
 
    The API will be available at: http://localhost:8000
 
    API Documentation: http://localhost:8000/docs
 
-4. **Optional: Start with pgAdmin (database UI):**
+3. **Optional: Start with pgAdmin (database UI):**
    ```bash
-   docker-compose --profile tools up
+   docker compose --profile tools up
    ```
 
    pgAdmin: http://localhost:5050 (admin@xoxo.com / admin)
@@ -150,8 +147,9 @@ This is the easiest way to get started. It will set up PostgreSQL and the API au
 5. **Copy and configure environment variables:**
    ```bash
    cp .env.example .env
-   # Edit .env with your settings
    ```
+
+   Edit `.env` to update the database connection if needed. The defaults should work with the PostgreSQL container above.
 
 6. **Run database migrations:**
    ```bash
@@ -220,7 +218,7 @@ pytest tests/integration/test_api/test_health.py
 ### Run tests in Docker
 
 ```bash
-docker-compose exec app pytest
+docker compose exec app pytest
 ```
 
 ## Code Quality
@@ -331,6 +329,12 @@ To add a new domain (e.g., "Volunteers"):
 
 ## Environment Variables
 
+### Configuration Methods
+
+- **Docker Compose** (recommended for local dev): Environment variables are defined in `docker-compose.yml`. No `.env` file needed.
+- **Local development** (without Docker): Copy `.env.example` to `.env` and customize as needed.
+- **Production**: Use platform-native environment variables or secrets management (never commit `.env` to git).
+
 See `.env.example` for all available environment variables.
 
 Key variables:
@@ -351,10 +355,15 @@ docker build -t xoxo-backend:latest .
 
 ### Running in Production
 
-1. Update `.env` with production values
-2. Set `ENVIRONMENT=production` and `DEBUG=False`
-3. Generate a secure `SECRET_KEY`
-4. Use managed PostgreSQL (AWS RDS, GCP Cloud SQL, etc.)
+1. Set environment variables via your platform (not `.env` file):
+   - `ENVIRONMENT=production`
+   - `DEBUG=False`
+2. Generate a secure `SECRET_KEY`:
+   ```bash
+   python -c "import secrets; print(secrets.token_urlsafe(32))"
+   ```
+3. Use managed PostgreSQL (AWS RDS, GCP Cloud SQL, etc.)
+4. Set `DATABASE_URL` to your production database
 
 ### Cloud Deployment
 
@@ -385,7 +394,7 @@ gcloud run deploy xoxo-backend \
 ### Database connection errors
 
 - Ensure PostgreSQL is running: `docker ps`
-- Check `DATABASE_URL` in `.env`
+- Check `DATABASE_URL` in `.env` (local dev) or `docker-compose.yml` (Docker)
 - Verify database exists: `docker exec -it xoxo-db psql -U xoxo -l`
 
 ### Import errors
