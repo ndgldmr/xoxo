@@ -1,0 +1,95 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  db:
+    image: postgres:16-alpine
+    container_name: xoxo-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: xoxo
+      POSTGRES_PASSWORD: xoxo
+      POSTGRES_DB: xoxo_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U xoxo"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # FastAPI Application
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: xoxo-backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # Application
+      APP_NAME: "XOXO Education API"
+      ENVIRONMENT: development
+      DEBUG: "True"
+      LOG_LEVEL: INFO
+
+      # Database
+      DATABASE_URL: postgresql+asyncpg://xoxo:xoxo@db:5432/xoxo_dev
+      DB_ECHO: "False"
+
+      # Server
+      HOST: 0.0.0.0
+      PORT: 8000
+
+      # CORS
+      ALLOWED_ORIGINS: http://localhost:3000,http://localhost:8000
+
+      # Security
+      SECRET_KEY: dev-secret-key-change-in-production
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount source code for development (comment out for production)
+      - ./app:/app/app
+      - ./alembic:/app/alembic
+    command: >
+      sh -c "
+        echo 'Waiting for database...' &&
+        sleep 5 &&
+        echo 'Running migrations...' &&
+        alembic upgrade head &&
+        echo 'Starting application...' &&
+        uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      "
+
+  # pgAdmin (Optional - for database management)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: xoxo-pgadmin
+    restart: unless-stopped
+    depends_on:
+      - db
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@xoxo.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    profiles:
+      - tools  # Only start with --profile tools
+
+volumes:
+  postgres_data:
+    driver: local
+  pgadmin_data:
+    driver: local
+
+networks:
+  default:
+    name: xoxo-network
