@@ -97,4 +97,84 @@ def sample_user_data() -> dict[str, Any]:
         "last_name": "User",
         "phone": "+1234567890",
         "is_active": True,
+        "password": "TestPassword123!",
+        "is_admin": False,
     }
+
+
+@pytest.fixture
+def sample_admin_data() -> dict[str, Any]:
+    """Sample admin user data for testing."""
+    return {
+        "email": "admin@xoxoeducation.com",
+        "first_name": "Admin",
+        "last_name": "User",
+        "phone": "+1234567890",
+        "is_active": True,
+        "password": "AdminPassword123!",
+        "is_admin": True,
+    }
+
+
+@pytest.fixture
+async def test_user(db_session: AsyncSession, sample_user_data: dict[str, Any]):
+    """Create a test user in the database."""
+    from app.models.user import User
+    from app.core.security import hash_password
+
+    user_data = sample_user_data.copy()
+    password = user_data.pop("password")
+
+    user = User(
+        **user_data,
+        hashed_password=hash_password(password)
+    )
+
+    db_session.add(user)
+    await db_session.commit()
+    await db_session.refresh(user)
+
+    # Store password for login tests
+    user.plain_password = password
+
+    return user
+
+
+@pytest.fixture
+async def test_admin(db_session: AsyncSession, sample_admin_data: dict[str, Any]):
+    """Create a test admin user in the database."""
+    from app.models.user import User
+    from app.core.security import hash_password
+
+    admin_data = sample_admin_data.copy()
+    password = admin_data.pop("password")
+
+    admin = User(
+        **admin_data,
+        hashed_password=hash_password(password)
+    )
+
+    db_session.add(admin)
+    await db_session.commit()
+    await db_session.refresh(admin)
+
+    # Store password for login tests
+    admin.plain_password = password
+
+    return admin
+
+
+@pytest.fixture
+async def user_token(test_user):
+    """Generate access token for test user."""
+    from app.core.security import create_access_token
+
+    return create_access_token(subject=test_user.id, is_admin=test_user.is_admin)
+
+
+@pytest.fixture
+async def admin_token(test_admin):
+    """Generate access token for test admin."""
+    from app.core.security import create_access_token
+
+    return create_access_token(subject=test_admin.id, is_admin=test_admin.is_admin)

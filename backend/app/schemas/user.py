@@ -18,13 +18,18 @@ class UserBase(BaseModel):
     last_name: str = Field(..., min_length=1, max_length=100, description="Last name")
     phone: Optional[str] = Field(None, max_length=20, description="Phone number")
     is_active: bool = Field(default=True, description="Whether user is active")
+    is_admin: bool = Field(default=False, description="Whether user has admin privileges")
 
 
 # Properties to receive on creation
 class UserCreate(UserBase):
-    """Schema for creating a new user."""
+    """Schema for creating a new user (admin-only operation)."""
 
-    pass
+    password: str = Field(
+        ...,
+        min_length=12,
+        description="User password (min 12 chars, must include uppercase, lowercase, digit, special char)"
+    )
 
 
 # Properties to receive on update
@@ -36,6 +41,7 @@ class UserUpdate(BaseModel):
     last_name: Optional[str] = Field(None, min_length=1, max_length=100, description="Last name")
     phone: Optional[str] = Field(None, max_length=20, description="Phone number")
     is_active: Optional[bool] = Field(None, description="Whether user is active")
+    is_admin: Optional[bool] = Field(None, description="Whether user has admin privileges")
 
 
 # Properties shared by models stored in DB
@@ -59,12 +65,12 @@ class User(UserInDBBase):
     pass
 
 
-# Properties stored in DB (for future use with auth)
+# Properties stored in DB
 class UserInDB(UserInDBBase):
     """
     User schema as stored in database.
-    Can include sensitive fields like hashed_password.
+    Includes sensitive fields like hashed_password.
+    NEVER expose this directly to API responses.
     """
 
-    # hashed_password: str = Field(..., description="Hashed password")
-    pass
+    hashed_password: str = Field(..., description="Hashed password")

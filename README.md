@@ -7,61 +7,121 @@ Backend and services for XOXO Education (https://www.xoxoeducation.com), a non-p
 ```
 xoxo/
 ├── backend/          # FastAPI backend application
-│   └── README.md     # Backend-specific documentation and setup
+│   ├── README.md     # Complete backend documentation
+│   └── CHANGELOG.md  # Version history and migration guides
 └── README.md         # This file
 ```
 
-## Getting Started
-
-### Backend
-
-The backend is a FastAPI application with PostgreSQL database, built with clean layered architecture.
-
-For detailed setup instructions, see: [backend/README.md](backend/README.md)
-
-Quick start with Docker:
+## Quick Start
 
 ```bash
 cd backend
-cp .env.example .env
-docker-compose up
+docker compose up
 ```
 
-API will be available at: http://localhost:8000
+**API**: http://localhost:8000
+**Interactive Docs**: http://localhost:8000/docs
 
-API Documentation: http://localhost:8000/docs
+## Features
+
+### 🔐 Authentication & Authorization
+- JWT-based authentication (access + refresh tokens)
+- Bcrypt password hashing with complexity requirements
+- Role-based access control (Admin/User)
+- Admin-only user management
+
+### 📊 User Management
+- Full CRUD operations (admin-only)
+- Email uniqueness validation
+- User activation/deactivation
+
+### 🏥 Health Monitoring
+- Health check endpoints
+- Database connectivity monitoring
 
 ## Tech Stack
 
 - **Backend**: FastAPI, Python 3.11+
-- **Database**: PostgreSQL (async)
-- **ORM**: SQLAlchemy 2.0+
+- **Database**: PostgreSQL (async via asyncpg)
+- **ORM**: SQLAlchemy 2.0+ (async)
+- **Authentication**: JWT tokens (python-jose), bcrypt (passlib)
 - **Migrations**: Alembic
-- **Testing**: pytest
+- **Testing**: pytest + pytest-asyncio
 - **Containerization**: Docker + Docker Compose
 
 ## Architecture
 
-The backend follows a **layered monolithic architecture**:
+The backend follows a **layered monolithic architecture** with clear separation of concerns:
 
-- **API Layer**: FastAPI routers, request/response handling
-- **Service Layer**: Business logic and orchestration
-- **Repository Layer**: Data access operations
-- **Data Layer**: PostgreSQL database
+```
+┌─────────────────────────────────────────┐
+│          API Layer (FastAPI)            │  ← HTTP, validation, routing
+├─────────────────────────────────────────┤
+│         Service Layer                   │  ← Business logic
+├─────────────────────────────────────────┤
+│        Repository Layer                 │  ← Data access
+├─────────────────────────────────────────┤
+│      Data Layer (PostgreSQL)            │  ← Persistence
+└─────────────────────────────────────────┘
+```
 
-For detailed architecture documentation, see [backend/README.md](backend/README.md)
+**Key Principles:**
+- Dependency injection for testability
+- Async-first for scalability
+- Type hints throughout for safety
+- Comprehensive test coverage
+
+## Getting Started
+
+See [backend/README.md](backend/README.md) for complete setup instructions, including:
+- Installation (Docker and local)
+- Database migrations
+- Creating admin users
+- Authentication setup
+- Testing
+- Deployment
+
+## Documentation
+
+- **[backend/README.md](backend/README.md)** - Complete backend documentation
+- **[backend/CHANGELOG.md](backend/CHANGELOG.md)** - Version history and migration guides
+- **Interactive API Docs** - http://localhost:8000/docs (when running)
 
 ## Development
 
 ### Prerequisites
-
 - Python 3.11+
-- Poetry
+- Poetry (dependency management)
 - Docker & Docker Compose
 
-### Setup
+### Local Setup
+```bash
+cd backend
+poetry install
+poetry shell
+alembic upgrade head
+python scripts/create_admin.py
+uvicorn app.main:app --reload
+```
 
-See [backend/README.md](backend/README.md) for detailed development setup instructions.
+### Docker Setup (Recommended)
+```bash
+cd backend
+docker compose up
+docker compose exec app python scripts/create_admin.py
+```
+
+## Testing
+
+```bash
+# In Docker
+docker compose exec app pytest
+
+# Locally
+cd backend
+poetry shell
+pytest
+```
 
 ## License
 

@@ -23,9 +23,8 @@ class User(Base, TimestampMixin):
     last_name: Mapped[str] = mapped_column(String(100), nullable=False)
     phone: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
-
-    # Future: Add password hash when implementing authentication
-    # hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
+    hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
+    is_admin: Mapped[bool] = mapped_column(default=False, nullable=False)
 
     def __repr__(self) -> str:
         return f"<User(id={self.id}, email='{self.email}', name='{self.first_name} {self.last_name}')>"

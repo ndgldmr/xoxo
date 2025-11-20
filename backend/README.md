@@ -33,10 +33,69 @@ This project follows a **layered monolithic architecture** with clear separation
 - **ORM**: SQLAlchemy 2.0+ (async)
 - **Migrations**: Alembic
 - **Validation**: Pydantic v2
+- **Authentication**: JWT tokens (access + refresh)
+- **Password Hashing**: bcrypt via passlib
 - **Testing**: pytest + pytest-asyncio
 - **Dependency Management**: Poetry
 - **Code Quality**: black, ruff, mypy
 - **Containerization**: Docker + Docker Compose
+
+## Features
+
+### 🔐 Authentication & Authorization
+
+#### Authentication System
+- **Password Security**: Bcrypt-based password hashing with unique salts per password
+- **JWT Tokens**: Access tokens (30 min) and Refresh tokens (7 day) strategy
+- **Login Flow**: Email/password authentication with token issuance
+- **Token Refresh**: Secure token refresh endpoint for extended sessions
+
+#### Authorization System
+- **Role-Based Access Control (RBAC)**: Admin and regular user roles
+- **Admin-Only User Management**: All user CRUD operations require admin privileges
+- **Protected Routes**: FastAPI dependency injection for route protection
+
+#### Password Policy
+- Minimum 12 characters
+- At least one uppercase letter
+- At least one lowercase letter
+- At least one digit
+- At least one special character (@$!%\*?&)
+
+#### Security Features
+- ✅ Password hashing with bcrypt (never store plain text)
+- ✅ JWT tokens with expiration
+- ✅ Password complexity requirements enforced
+- ✅ Token type verification (prevents access token used as refresh)
+- ✅ Admin role enforcement
+- ✅ Production SECRET_KEY validation (fails if default in production)
+- ✅ Inactive user account protection
+
+### 📊 User Management
+- Full CRUD operations for users (admin-only)
+- Email uniqueness validation
+- User activation/deactivation (soft delete)
+- Pagination support
+- Password strength validation on user creation
+
+### 🏥 Health & Monitoring
+- Health check endpoints (`/health`, `/health/db`)
+- Database connectivity monitoring
+
+### 🔮 Future Security Enhancements (Optional)
+
+These features are not currently implemented but may be considered for future releases:
+
+- **Token Blacklist/Revocation**: Enable explicit logout by blacklisting tokens
+- **Rate Limiting**: Protect auth endpoints from brute force attacks
+- **Multi-Factor Authentication (MFA)**: Add TOTP/SMS verification
+- **OAuth2/OIDC Integration**: Support third-party authentication (Google, Microsoft, etc.)
+- **Email Verification**: Require email verification for new users
+- **Password Reset Flow**: Allow users to reset forgotten passwords
+- **Audit Logging**: Track all admin actions for compliance
+- **IP-Based Access Controls**: Restrict access by IP address or geolocation
+- **Session Management**: Track active sessions and allow users to revoke them
+- **Account Lockout**: Temporarily lock accounts after failed login attempts
 
 ## Project Structure
 
@@ -46,40 +105,54 @@ backend/
 │   ├── api/
 │   │   └── v1/
 │   │       ├── endpoints/      # API endpoints
+│   │       │   ├── auth.py     # 🔐 Authentication endpoints
 │   │       │   ├── health.py
-│   │       │   └── users.py
+│   │       │   └── users.py    # 🔒 Protected user management
 │   │       └── router.py       # API router aggregation
 │   ├── core/
 │   │   ├── config.py          # Settings & configuration
-│   │   ├── deps.py            # FastAPI dependencies
-│   │   └── exceptions.py      # Custom exceptions
+│   │   ├── deps.py            # 🔐 Auth dependencies
+│   │   ├── exceptions.py      # Custom exceptions
+│   │   └── security.py        # 🔐 Password & JWT utilities
 │   ├── db/
 │   │   ├── base.py            # Import all models for Alembic
 │   │   ├── base_class.py      # Base ORM class
 │   │   └── session.py         # Async session management
 │   ├── models/                # SQLAlchemy models
-│   │   └── user.py
+│   │   └── user.py            # User with auth fields
 │   ├── repositories/          # Data access layer
 │   │   ├── base.py
 │   │   └── user.py
 │   ├── schemas/               # Pydantic schemas
-│   │   └── user.py
+│   │   ├── auth.py            # 🔐 Auth schemas
+│   │   └── user.py            # User schemas with password
 │   ├── services/              # Business logic
-│   │   └── user.py
+│   │   ├── auth.py            # 🔐 Auth service
+│   │   └── user.py            # User service with password hashing
 │   └── main.py                # FastAPI app entry point
 ├── alembic/                   # Database migrations
-│   ├── versions/
+│   ├── versions/              # Migration files
+│   │   └── 2025_11_19_*_auth.py
 │   └── env.py
 ├── tests/
-│   ├── conftest.py           # Pytest fixtures
-│   ├── unit/
-│   └── integration/
+│   ├── conftest.py           # Pytest fixtures (with auth fixtures)
+│   └── unit/
+│       └── test_security.py  # 🔐 Auth unit tests (20 tests)
 ├── scripts/                   # Utility scripts
+│   └── create_admin.py       # 🔐 Admin user creation
 ├── .env.example              # Environment variables template
 ├── alembic.ini               # Alembic configuration
 ├── docker-compose.yml        # Docker Compose setup
 ├── Dockerfile                # Multi-stage Docker build
-└── pyproject.toml            # Poetry dependencies
+├── pyproject.toml            # Poetry dependencies
+├── CHANGELOG.md              # Project changelog
+├── .github/                  # GitHub templates
+│   └── PULL_REQUEST_TEMPLATE.md
+└── docs/                     # 📚 Documentation
+    ├── README.md             # Documentation index
+    ├── authentication.md     # Auth implementation guide
+    ├── quick-start.md        # Quick reference
+    └── development/          # Development guides
 ```
 
 ## Getting Started
@@ -164,6 +237,176 @@ This is the easiest way to get started. It will set up PostgreSQL and the API au
    API: http://localhost:8000
    Docs: http://localhost:8000/docs
 
+## 🔐 Authentication Setup
+
+After starting the application, you need to create your first admin user:
+
+### Create Admin User
+
+**With Docker:**
+```bash
+docker compose exec app python scripts/create_admin.py
+```
+
+**Locally:**
+```bash
+python scripts/create_admin.py
+```
+
+The script will interactively prompt you for:
+- Email
+- First name, last name, phone (optional)
+- Password (must meet complexity requirements: 12+ chars, uppercase, lowercase, digit, special char)
+
+### Authentication API Endpoints
+
+#### **POST /api/v1/auth/login**
+
+Authenticate with email and password to receive JWT tokens.
+
+**Request:**
+```json
+{
+  "email": "admin@xoxoeducation.com",
+  "password": "AdminPassword123!"
+}
+```
+
+**Response (200):**
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "token_type": "bearer"
+}
+```
+
+**Errors:**
+- `401`: Invalid credentials or inactive account
+
+**Example:**
+```bash
+curl -X POST http://localhost:8000/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "admin@xoxoeducation.com",
+    "password": "YourPassword123!"
+  }'
+```
+
+---
+
+#### **POST /api/v1/auth/refresh**
+
+Refresh access token using refresh token.
+
+**Request:**
+```json
+{
+  "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+}
+```
+
+**Response (200):**
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "token_type": "bearer"
+}
+```
+
+**Errors:**
+- `401`: Invalid or expired refresh token
+
+**Example:**
+```bash
+curl -X POST http://localhost:8000/api/v1/auth/refresh \
+  -H "Content-Type: application/json" \
+  -d '{
+    "refresh_token": "YOUR_REFRESH_TOKEN"
+  }'
+```
+
+---
+
+#### **GET /api/v1/auth/me**
+
+Get current authenticated user's profile.
+
+**Headers:**
+```
+Authorization: Bearer <access_token>
+```
+
+**Response (200):**
+```json
+{
+  "id": 1,
+  "email": "admin@xoxoeducation.com",
+  "first_name": "Admin",
+  "last_name": "User",
+  "phone": "+1234567890",
+  "is_active": true,
+  "is_admin": true,
+  "created_at": "2025-11-19T16:00:00Z",
+  "updated_at": "2025-11-19T16:00:00Z"
+}
+```
+
+**Errors:**
+- `401`: Invalid or missing token
+- `403`: Inactive user account
+
+**Example:**
+```bash
+curl http://localhost:8000/api/v1/auth/me \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+---
+
+### Protected User Management Endpoints
+
+All user management endpoints (`/api/v1/users/*`) now require admin authentication. Include the `Authorization: Bearer <access_token>` header with an admin user's token.
+
+**Example - Create User (Admin Only):**
+```bash
+curl -X POST http://localhost:8000/api/v1/users/ \
+  -H "Authorization: Bearer YOUR_ADMIN_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "newuser@example.com",
+    "first_name": "New",
+    "last_name": "User",
+    "password": "SecurePass123!",
+    "phone": "+1234567890",
+    "is_active": true,
+    "is_admin": false
+  }'
+```
+
+**Response (201):**
+```json
+{
+  "id": 2,
+  "email": "newuser@example.com",
+  "first_name": "New",
+  "last_name": "User",
+  "phone": "+1234567890",
+  "is_active": true,
+  "is_admin": false,
+  "created_at": "2025-11-19T16:00:00Z",
+  "updated_at": "2025-11-19T16:00:00Z"
+}
+```
+
+**Errors:**
+- `401`: Not authenticated
+- `403`: Not admin (Admin privileges required)
+- `409`: Email already exists
+- `422`: Password doesn't meet requirements
+
 ## Database Migrations
 
 ### Create a new migration
@@ -197,29 +440,65 @@ alembic history
 
 ## Testing
 
-### Run all tests
+### Run All Tests
 
 ```bash
+# Locally (if dependencies installed)
 pytest
-```
 
-### Run with coverage
-
-```bash
-pytest --cov=app --cov-report=html
-```
-
-### Run specific test file
-
-```bash
-pytest tests/integration/test_api/test_health.py
-```
-
-### Run tests in Docker
-
-```bash
+# In Docker (recommended)
 docker compose exec app pytest
 ```
+
+### Test Coverage
+
+**Current Test Suite:**
+- **20 unit tests** covering core authentication functionality
+- **Unit Tests** (`tests/unit/test_security.py`): 20 tests covering password hashing, validation, and JWT operations
+- **Functional tests**: To be added in future releases
+
+**Run with Coverage Report:**
+```bash
+# Generate HTML coverage report
+pytest --cov=app --cov-report=html
+
+# View coverage in terminal
+pytest --cov=app --cov-report=term-missing
+
+# In Docker
+docker compose exec app pytest --cov=app --cov-report=term-missing
+```
+
+### Run Specific Test Suites
+
+```bash
+# All tests (unit tests only)
+pytest -v
+
+# Authentication unit tests (password hashing, JWT)
+pytest tests/unit/test_security.py -v
+
+# In Docker
+docker compose exec app pytest -v
+docker compose exec app pytest tests/unit/test_security.py -v
+```
+
+### Test Scenarios Covered
+
+**Authentication Unit Tests (20 tests):**
+- ✅ Password hashing (bcrypt with unique salts)
+- ✅ Password verification (valid/invalid)
+- ✅ Password strength validation (all complexity rules)
+- ✅ JWT access token creation and decoding
+- ✅ JWT refresh token creation and decoding
+- ✅ Token expiration handling
+- ✅ Token type verification (access vs refresh)
+- ✅ Custom expiration times
+
+**Future Testing:**
+- Functional/integration tests for API endpoints
+- End-to-end authentication flows
+- Protected route access control testing
 
 ## Code Quality
 
@@ -257,60 +536,119 @@ Now code quality checks will run automatically on git commit.
 
 ## API Documentation
 
-Once the server is running, visit:
+Once the server is running, visit the interactive API documentation:
 
 - **Swagger UI**: http://localhost:8000/docs
-- **ReDoc**: http://localhost:8000/redoc
-- **OpenAPI JSON**: http://localhost:8000/api/v1/openapi.json
+  - Try the authentication flow: Login → Copy access token → Click "Authorize" → Test protected endpoints
+  - Includes all endpoints: Authentication, User Management, Health
+- **ReDoc**: http://localhost:8000/redoc (Alternative documentation viewer)
+- **OpenAPI JSON**: http://localhost:8000/api/v1/openapi.json (Raw OpenAPI specification)
 
 ## Example API Usage
 
-### Health Check
+### Health Check (No Auth Required)
 
 ```bash
 curl http://localhost:8000/api/v1/health
 ```
 
-### Create a User
+### Authentication Flow
+
+#### 1. Login to Get Tokens
+
+```bash
+curl -X POST http://localhost:8000/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "admin@xoxoeducation.com",
+    "password": "YourPassword123!"
+  }'
+```
+
+**Response:**
+```json
+{
+  "access_token": "eyJhbG...",
+  "refresh_token": "eyJhbG...",
+  "token_type": "bearer"
+}
+```
+
+#### 2. Get Current User Profile
+
+```bash
+curl http://localhost:8000/api/v1/auth/me \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+#### 3. Refresh Tokens (When Access Token Expires)
+
+```bash
+curl -X POST http://localhost:8000/api/v1/auth/refresh \
+  -H "Content-Type: application/json" \
+  -d '{
+    "refresh_token": "YOUR_REFRESH_TOKEN"
+  }'
+```
+
+### User Management (Admin Only)
+
+**Note:** All user management endpoints require admin authentication. Include `Authorization: Bearer <admin_access_token>` header.
+
+#### Create a User
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/users \
+  -H "Authorization: Bearer YOUR_ADMIN_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "email": "john@example.com",
     "first_name": "John",
     "last_name": "Doe",
+    "password": "SecurePass123!",
     "phone": "+1234567890",
-    "is_active": true
+    "is_active": true,
+    "is_admin": false
   }'
 ```
 
-### Get All Users
+#### Get All Users
 
 ```bash
-curl http://localhost:8000/api/v1/users
+curl http://localhost:8000/api/v1/users \
+  -H "Authorization: Bearer YOUR_ADMIN_ACCESS_TOKEN"
 ```
 
-### Get User by ID
+#### Get User by ID
 
 ```bash
-curl http://localhost:8000/api/v1/users/1
+curl http://localhost:8000/api/v1/users/1 \
+  -H "Authorization: Bearer YOUR_ADMIN_ACCESS_TOKEN"
 ```
 
-### Update User
+#### Update User
 
 ```bash
 curl -X PUT http://localhost:8000/api/v1/users/1 \
+  -H "Authorization: Bearer YOUR_ADMIN_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "first_name": "Jane"
   }'
 ```
 
-### Delete User
+#### Deactivate User (Soft Delete)
 
 ```bash
-curl -X DELETE http://localhost:8000/api/v1/users/1
+curl -X POST http://localhost:8000/api/v1/users/1/deactivate \
+  -H "Authorization: Bearer YOUR_ADMIN_ACCESS_TOKEN"
+```
+
+#### Delete User (Hard Delete)
+
+```bash
+curl -X DELETE http://localhost:8000/api/v1/users/1 \
+  -H "Authorization: Bearer YOUR_ADMIN_ACCESS_TOKEN"
 ```
 
 ## Adding New Features
@@ -337,15 +675,45 @@ To add a new domain (e.g., "Volunteers"):
 
 See `.env.example` for all available environment variables.
 
-Key variables:
+### Key Variables
 
+**Database & Application:**
 - `DATABASE_URL`: PostgreSQL connection string
 - `ENVIRONMENT`: development, staging, or production
-- `DEBUG`: Enable debug mode
+- `DEBUG`: Enable debug mode (true/false)
 - `ALLOWED_ORIGINS`: CORS origins (comma-separated)
-- `SECRET_KEY`: Secret key for JWT (change in production!)
+
+**Authentication & Security (Required for Production):**
+- `SECRET_KEY`: Secret key for JWT tokens (MUST be changed in production!)
+- `ACCESS_TOKEN_EXPIRE_MINUTES`: Access token expiration in minutes (default: 30)
+- `REFRESH_TOKEN_EXPIRE_MINUTES`: Refresh token expiration in minutes (default: 10080 = 7 days)
+- `ALGORITHM`: JWT signing algorithm (default: HS256)
+
+### Generate Secure SECRET_KEY
+
+**CRITICAL for Production:** Never use the default SECRET_KEY in production. Generate a secure random key:
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+
+Example output: `qJ7xK3mP9nR2sT5vW8yZ0aB1cD4eF6gH9jK2lM5nP8qR`
+
+Set this as your `SECRET_KEY` environment variable in production. The application will fail to start if using the default key with `ENVIRONMENT=production`.
 
 ## Deployment
+
+### Pre-Deployment Checklist
+
+Before deploying to production, ensure:
+
+1. ✅ **Generate Secure SECRET_KEY** - Never use default
+2. ✅ **Run Database Migrations** - Apply all migrations including auth
+3. ✅ **Create First Admin User** - Use `scripts/create_admin.py`
+4. ✅ **Test Authentication Flow** - Verify login, token refresh, protected endpoints
+5. ✅ **Run Test Suite** - All 20 unit tests should pass
+6. ✅ **Configure Environment Variables** - Set production values
+7. ✅ **Use Managed PostgreSQL** - AWS RDS, GCP Cloud SQL, etc.
 
 ### Building for Production
 
@@ -355,15 +723,35 @@ docker build -t xoxo-backend:latest .
 
 ### Running in Production
 
-1. Set environment variables via your platform (not `.env` file):
-   - `ENVIRONMENT=production`
-   - `DEBUG=False`
-2. Generate a secure `SECRET_KEY`:
+1. **Set Environment Variables** (via your platform, not `.env` file):
+   ```bash
+   ENVIRONMENT=production
+   DEBUG=False
+   SECRET_KEY=<your-secure-random-key>
+   ACCESS_TOKEN_EXPIRE_MINUTES=30
+   REFRESH_TOKEN_EXPIRE_MINUTES=10080
+   DATABASE_URL=postgresql+asyncpg://user:pass@host:5432/db
+   ALLOWED_ORIGINS=https://yourdomain.com
+   ```
+
+2. **Generate Secure SECRET_KEY**:
    ```bash
    python -c "import secrets; print(secrets.token_urlsafe(32))"
    ```
-3. Use managed PostgreSQL (AWS RDS, GCP Cloud SQL, etc.)
-4. Set `DATABASE_URL` to your production database
+
+3. **Use Managed PostgreSQL** (AWS RDS, GCP Cloud SQL, etc.)
+
+4. **Run Database Migrations**:
+   ```bash
+   alembic upgrade head
+   ```
+
+5. **Create First Admin User**:
+   ```bash
+   python scripts/create_admin.py
+   ```
+
+6. **Verify Production SECRET_KEY** - Application will fail to start if using default key with `ENVIRONMENT=production`
 
 ### Cloud Deployment
 
@@ -391,22 +779,83 @@ gcloud run deploy xoxo-backend \
 
 ## Troubleshooting
 
-### Database connection errors
+### Authentication Issues
+
+#### "SECRET_KEY must be changed in production"
+**Cause:** Using the default SECRET_KEY with `ENVIRONMENT=production`
+**Solution:** Generate and set a secure SECRET_KEY:
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+Set the output as your `SECRET_KEY` environment variable.
+
+#### "Incorrect email or password"
+**Cause:** Invalid credentials
+**Solution:** Verify email and password are correct. Check that user exists in database and password was hashed correctly during creation.
+
+#### "User account is inactive"
+**Cause:** User has `is_active=false` in database
+**Solution:** Reactivate user by setting `is_active=true` in database or via API if you have admin access.
+
+#### "Could not validate credentials" or "Invalid token"
+**Cause:** Token expired, malformed, or invalid
+**Solution:** Login again to get new tokens. Access tokens expire after 30 minutes by default.
+
+#### "Admin privileges required"
+**Cause:** Endpoint requires admin role but user is not admin
+**Solution:** Ensure user has `is_admin=true` in database. Create admin user with `scripts/create_admin.py`.
+
+#### "Invalid or expired refresh token"
+**Cause:** Refresh token expired (7 days default) or is invalid
+**Solution:** Login again to get new tokens. Cannot refresh an expired refresh token.
+
+#### "Password does not meet security requirements"
+**Cause:** Password doesn't meet complexity requirements
+**Solution:** Ensure password has:
+- At least 12 characters
+- At least one uppercase letter
+- At least one lowercase letter
+- At least one digit
+- At least one special character (@$!%\*?&)
+
+#### Bcrypt version warning (non-critical)
+**Warning:** `(trapped) error reading bcrypt version`
+**Impact:** None - admin user created successfully
+**Cause:** bcrypt 4.x removed `__about__.__version__` that passlib tries to read
+**Solution:** Ignore - this is cosmetic only and doesn't affect functionality
+
+### Database Connection Errors
 
 - Ensure PostgreSQL is running: `docker ps`
 - Check `DATABASE_URL` in `.env` (local dev) or `docker-compose.yml` (Docker)
 - Verify database exists: `docker exec -it xoxo-db psql -U xoxo -l`
 
-### Import errors
+### Import Errors
 
 - Ensure you're in the Poetry shell: `poetry shell`
 - Install dependencies: `poetry install`
+- If testing locally without Docker, install `httpx`: `poetry add --group dev httpx`
 
-### Migration errors
+### Migration Errors
 
 - Check that all models are imported in `app/db/base.py`
 - Verify database connection
 - Review migration file in `alembic/versions/`
+
+### Test Errors
+
+#### "ModuleNotFoundError: No module named 'httpx'"
+**Cause:** Running tests locally without installing dependencies
+**Solution (Recommended):** Run tests in Docker:
+```bash
+docker compose exec app pytest
+```
+**Solution (Alternative):** Install dependencies locally:
+```bash
+poetry install
+poetry shell
+pytest
+```
 
 ## Contributing
 
@@ -421,4 +870,14 @@ Proprietary - XOXO Education
 
 ## Support
 
-For questions or issues, contact the development team or create an issue in the repository.
+For questions or issues:
+
+- **Documentation**: All information is in this README.md and [CHANGELOG.md](CHANGELOG.md)
+- **Interactive API Docs**: http://localhost:8000/docs (when running)
+- **Code Comments**: Review `app/core/security.py` and `app/services/auth.py` for implementation details
+- **Issues**: Create a GitHub issue with detailed information
+- **Root README**: See [../README.md](../README.md) for project overview
+
+## Version History
+
+See [CHANGELOG.md](CHANGELOG.md) for detailed version history, migration guides, and breaking changes.

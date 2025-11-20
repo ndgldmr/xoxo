@@ -20,8 +20,8 @@ COPY pyproject.toml poetry.lock* ./
 # Configure poetry to not create virtual environment (we're in a container)
 RUN poetry config virtualenvs.create false
 
-# Install dependencies
-RUN poetry install --only main --no-interaction --no-ansi
+# Install dependencies (including dev dependencies for testing)
+RUN poetry install --no-interaction --no-ansi
 
 # Stage 2: Runtime
 FROM python:3.11-slim
@@ -44,6 +44,8 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 COPY --chown=appuser:appuser ./app /app/app
 COPY --chown=appuser:appuser ./alembic /app/alembic
 COPY --chown=appuser:appuser ./alembic.ini /app/alembic.ini
+COPY --chown=appuser:appuser ./scripts /app/scripts
+COPY --chown=appuser:appuser ./tests /app/tests
 
 # Switch to non-root user
 USER appuser
