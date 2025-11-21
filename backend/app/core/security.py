@@ -86,9 +86,7 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 
 def create_access_token(
-    subject: int,
-    is_admin: bool = False,
-    expires_delta: Optional[timedelta] = None
+    subject: int, is_admin: bool = False, expires_delta: Optional[timedelta] = None
 ) -> str:
     """
     Create a JWT access token.
@@ -116,15 +114,15 @@ def create_access_token(
     }
 
     encoded_jwt = jwt.encode(
-        to_encode,
-        settings.SECRET_KEY,
-        algorithm=settings.ALGORITHM
+        to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM
     )
 
     return encoded_jwt
 
 
-def create_refresh_token(subject: int, expires_delta: Optional[timedelta] = None) -> str:
+def create_refresh_token(
+    subject: int, expires_delta: Optional[timedelta] = None
+) -> str:
     """
     Create a JWT refresh token.
 
@@ -149,9 +147,7 @@ def create_refresh_token(subject: int, expires_delta: Optional[timedelta] = None
     }
 
     encoded_jwt = jwt.encode(
-        to_encode,
-        settings.SECRET_KEY,
-        algorithm=settings.ALGORITHM
+        to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM
     )
 
     return encoded_jwt
@@ -170,11 +166,7 @@ def decode_token(token: str) -> dict[str, Any]:
     Raises:
         JWTError: If token is invalid or expired
     """
-    payload = jwt.decode(
-        token,
-        settings.SECRET_KEY,
-        algorithms=[settings.ALGORITHM]
-    )
+    payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
     return payload
 
 

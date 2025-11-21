@@ -35,6 +35,14 @@ docker compose up
 - Email uniqueness validation
 - User activation/deactivation
 
+### 👨‍🎓 Student Tracking
+- Student CRUD operations (admin-only)
+- Students are NOT system users (no login)
+- Email and phone number uniqueness
+- Soft delete with activation/deactivation
+- Advanced filtering (by name, email, country, active status)
+- E.164 phone number validation
+
 ### 🏥 Health Monitoring
 - Health check endpoints
 - Database connectivity monitoring

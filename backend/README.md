@@ -78,6 +78,16 @@ This project follows a **layered monolithic architecture** with clear separation
 - Pagination support
 - Password strength validation on user creation
 
+### 👨‍🎓 Student Tracking
+- Full CRUD operations for students (admin-only)
+- Students are NOT system users (no authentication)
+- Email and phone number uniqueness enforcement
+- Soft delete with activation/deactivation support
+- Advanced filtering (name, email, country, active status)
+- Strict E.164 phone number validation
+- Automatic email normalization (lowercase)
+- Pagination support
+
 ### 🏥 Health & Monitoring
 - Health check endpoints (`/health`, `/health/db`)
 - Database connectivity monitoring
@@ -107,6 +117,7 @@ backend/
 │   │       ├── endpoints/      # API endpoints
 │   │       │   ├── auth.py     # 🔐 Authentication endpoints
 │   │       │   ├── health.py
+│   │       │   ├── students.py # 👨‍🎓 Student management
 │   │       │   └── users.py    # 🔒 Protected user management
 │   │       └── router.py       # API router aggregation
 │   ├── core/
@@ -119,25 +130,32 @@ backend/
 │   │   ├── base_class.py      # Base ORM class
 │   │   └── session.py         # Async session management
 │   ├── models/                # SQLAlchemy models
+│   │   ├── student.py         # 👨‍🎓 Student model
 │   │   └── user.py            # User with auth fields
 │   ├── repositories/          # Data access layer
 │   │   ├── base.py
+│   │   ├── student.py         # 👨‍🎓 Student repository
 │   │   └── user.py
 │   ├── schemas/               # Pydantic schemas
 │   │   ├── auth.py            # 🔐 Auth schemas
+│   │   ├── student.py         # 👨‍🎓 Student schemas
 │   │   └── user.py            # User schemas with password
 │   ├── services/              # Business logic
 │   │   ├── auth.py            # 🔐 Auth service
+│   │   ├── student.py         # 👨‍🎓 Student service
 │   │   └── user.py            # User service with password hashing
 │   └── main.py                # FastAPI app entry point
 ├── alembic/                   # Database migrations
 │   ├── versions/              # Migration files
-│   │   └── 2025_11_19_*_auth.py
+│   │   ├── 2025_11_19_*_auth.py
+│   │   └── 2025_11_21_*_add_students_table.py
 │   └── env.py
 ├── tests/
 │   ├── conftest.py           # Pytest fixtures (with auth fixtures)
 │   └── unit/
-│       └── test_security.py  # 🔐 Auth unit tests (20 tests)
+│       ├── test_security.py  # 🔐 Auth unit tests (20 tests)
+│       └── test_services/
+│           └── test_student.py  # 👨‍🎓 Student service tests
 ├── scripts/                   # Utility scripts
 │   └── create_admin.py       # 🔐 Admin user creation
 ├── .env.example              # Environment variables template
@@ -650,6 +668,116 @@ curl -X POST http://localhost:8000/api/v1/users/1/deactivate \
 curl -X DELETE http://localhost:8000/api/v1/users/1 \
   -H "Authorization: Bearer YOUR_ADMIN_ACCESS_TOKEN"
 ```
+
+### Student Management (Admin Only)
+
+**Note:** All student management endpoints require admin authentication. Students are NOT system users and have no login credentials.
+
+#### Create a Student
+
+```bash
+curl -X POST http://localhost:8000/api/v1/students \
+  -H "Authorization: Bearer YOUR_ADMIN_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "student@example.com",
+    "first_name": "Jane",
+    "last_name": "Smith",
+    "phone_number": "+17038590314",
+    "country": "USA",
+    "is_active": true
+  }'
+```
+
+**Response (201):**
+```json
+{
+  "id": 1,
+  "email": "student@example.com",
+  "first_name": "Jane",
+  "last_name": "Smith",
+  "phone_number": "+17038590314",
+  "country": "USA",
+  "is_active": true,
+  "created_at": "2025-11-21T17:00:00Z",
+  "updated_at": "2025-11-21T17:00:00Z"
+}
+```
+
+**Errors:**
+- `401`: Not authenticated
+- `403`: Not admin
+- `409`: Email or phone number already exists
+- `422`: Validation error (invalid email or phone format)
+
+**Phone Number Format:** Must be E.164 format: `+[country code][number]` (e.g., `+17038590314`)
+
+#### Get All Students (with Filters)
+
+```bash
+# Get all students with pagination
+curl http://localhost:8000/api/v1/students?skip=0&limit=100 \
+  -H "Authorization: Bearer YOUR_ADMIN_ACCESS_TOKEN"
+
+# Get only active students
+curl http://localhost:8000/api/v1/students?active_only=true \
+  -H "Authorization: Bearer YOUR_ADMIN_ACCESS_TOKEN"
+
+# Filter by name (searches first and last name)
+curl http://localhost:8000/api/v1/students?name=Jane \
+  -H "Authorization: Bearer YOUR_ADMIN_ACCESS_TOKEN"
+
+# Filter by email
+curl http://localhost:8000/api/v1/students?email=student@example.com \
+  -H "Authorization: Bearer YOUR_ADMIN_ACCESS_TOKEN"
+
+# Filter by country
+curl http://localhost:8000/api/v1/students?country=USA \
+  -H "Authorization: Bearer YOUR_ADMIN_ACCESS_TOKEN"
+
+# Combine multiple filters
+curl "http://localhost:8000/api/v1/students?active_only=true&country=USA&limit=50" \
+  -H "Authorization: Bearer YOUR_ADMIN_ACCESS_TOKEN"
+```
+
+#### Get Student by ID
+
+```bash
+curl http://localhost:8000/api/v1/students/1 \
+  -H "Authorization: Bearer YOUR_ADMIN_ACCESS_TOKEN"
+```
+
+#### Update Student
+
+```bash
+curl -X PUT http://localhost:8000/api/v1/students/1 \
+  -H "Authorization: Bearer YOUR_ADMIN_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "first_name": "Janet",
+    "country": "Canada"
+  }'
+```
+
+**Note:** All fields are optional. Only provided fields will be updated.
+
+#### Deactivate Student (Soft Delete)
+
+```bash
+curl -X DELETE http://localhost:8000/api/v1/students/1 \
+  -H "Authorization: Bearer YOUR_ADMIN_ACCESS_TOKEN"
+```
+
+**Note:** This performs a soft delete by setting `is_active=False`. The student record remains in the database.
+
+#### Activate Student
+
+```bash
+curl -X POST http://localhost:8000/api/v1/students/1/activate \
+  -H "Authorization: Bearer YOUR_ADMIN_ACCESS_TOKEN"
+```
+
+**Note:** Reactivates a previously deactivated student.
 
 ## Adding New Features
 

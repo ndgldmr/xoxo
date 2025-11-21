@@ -3,10 +3,9 @@ Authentication service layer.
 Contains business logic for user authentication and token management.
 """
 
-from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import UnauthorizedException, ValidationException
+from app.core.exceptions import UnauthorizedException
 from app.core.security import (
     verify_password,
     create_access_token,
@@ -71,10 +70,7 @@ class AuthService:
         Returns:
             TokenResponse with access and refresh tokens
         """
-        access_token = create_access_token(
-            subject=user.id,
-            is_admin=user.is_admin
-        )
+        access_token = create_access_token(subject=user.id, is_admin=user.is_admin)
 
         refresh_token = create_refresh_token(subject=user.id)
 

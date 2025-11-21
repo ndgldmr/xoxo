@@ -1,5 +1,5 @@
 """
-User ORM model.
+Student ORM model.
 """
 
 from typing import Optional
@@ -10,12 +10,13 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db.base_class import Base, TimestampMixin
 
 
-class User(Base, TimestampMixin):
+class Student(Base, TimestampMixin):
     """
-    User model representing users in the system.
+    Student model representing students tracked in the system.
+    Students are NOT system users (no authentication).
     """
 
-    __tablename__ = "users"
+    __tablename__ = "students"
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True, autoincrement=True)
     email: Mapped[str] = mapped_column(
@@ -23,15 +24,16 @@ class User(Base, TimestampMixin):
     )
     first_name: Mapped[str] = mapped_column(String(100), nullable=False)
     last_name: Mapped[str] = mapped_column(String(100), nullable=False)
-    phone: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    phone_number: Mapped[str] = mapped_column(
+        String(20), unique=True, index=True, nullable=False
+    )
+    country: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
-    hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
-    is_admin: Mapped[bool] = mapped_column(default=False, nullable=False)
 
     def __repr__(self) -> str:
-        return f"<User(id={self.id}, email='{self.email}', name='{self.first_name} {self.last_name}')>"
+        return f"<Student(id={self.id}, email='{self.email}', name='{self.first_name} {self.last_name}')>"
 
     @property
     def full_name(self) -> str:
-        """Get user's full name."""
+        """Get student's full name."""
         return f"{self.first_name} {self.last_name}"
