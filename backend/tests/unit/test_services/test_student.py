@@ -60,6 +60,9 @@ class TestStudentService:
             phone_number="+17038590314",
             country="USA",
             is_active=True,
+            proficiency_level="beginner",
+            native_language="pt-BR",
+            wants_daily_message=False,
         )
         return student
 
@@ -71,6 +74,7 @@ class TestStudentService:
             first_name="John",
             last_name="Doe",
             phone_number="+17038590314",
+            proficiency_level="beginner",
             country="USA",
         )
 
@@ -147,6 +151,7 @@ class TestStudentService:
             first_name="John",
             last_name="Doe",
             phone_number="+17038590314",
+            proficiency_level="beginner",
             country="USA",
         )
 
@@ -315,6 +320,7 @@ class TestStudentService:
                 first_name="John",
                 last_name="Doe",
                 phone_number=phone,
+                proficiency_level="beginner",
             )
             assert student_data.phone_number == phone
 
@@ -337,6 +343,7 @@ class TestStudentService:
                     first_name="John",
                     last_name="Doe",
                     phone_number=phone,
+                    proficiency_level="beginner",
                 )
 
     # Test email normalization
@@ -351,3 +358,304 @@ class TestStudentService:
         for input_email, expected in test_cases:
             result = service._normalize_email(input_email)
             assert result == expected
+
+    # ========================================================================
+    # PHASE 0: MESSAGING PREFERENCES TESTS
+    # ========================================================================
+
+    # Test proficiency_level validation
+    def test_proficiency_level_valid_values(self):
+        """Test that valid proficiency levels are accepted."""
+        valid_levels = ["beginner", "intermediate", "advanced"]
+
+        for level in valid_levels:
+            student_data = StudentCreate(
+                email="test@example.com",
+                first_name="John",
+                last_name="Doe",
+                phone_number="+17038590314",
+                proficiency_level=level,
+            )
+            # Validator normalizes to lowercase
+            assert student_data.proficiency_level == level.lower()
+
+    def test_proficiency_level_case_insensitive(self):
+        """Test that proficiency level validation is case-insensitive."""
+        test_cases = ["Beginner", "INTERMEDIATE", "AdVaNcEd"]
+
+        for level in test_cases:
+            student_data = StudentCreate(
+                email="test@example.com",
+                first_name="John",
+                last_name="Doe",
+                phone_number="+17038590314",
+                proficiency_level=level,
+            )
+            assert student_data.proficiency_level == level.lower()
+
+    def test_proficiency_level_invalid_value(self):
+        """Test that invalid proficiency levels are rejected."""
+        invalid_levels = ["expert", "novice", "fluent", ""]
+
+        for level in invalid_levels:
+            with pytest.raises(ValidationError, match="Proficiency level must be one of"):
+                StudentCreate(
+                    email="test@example.com",
+                    first_name="John",
+                    last_name="Doe",
+                    phone_number="+17038590314",
+                    proficiency_level=level,
+                )
+
+    def test_proficiency_level_required_on_create(self):
+        """Test that proficiency_level is required when creating a student."""
+        with pytest.raises(ValidationError):
+            StudentCreate(
+                email="test@example.com",
+                first_name="John",
+                last_name="Doe",
+                phone_number="+17038590314",
+            )
+
+    # Test native_language default
+    def test_native_language_default_value(self):
+        """Test that native_language defaults to pt-BR."""
+        student_data = StudentCreate(
+            email="test@example.com",
+            first_name="John",
+            last_name="Doe",
+            phone_number="+17038590314",
+            proficiency_level="beginner",
+        )
+        assert student_data.native_language == "pt-BR"
+
+    def test_native_language_can_be_overridden(self):
+        """Test that native_language can be set to a custom value."""
+        student_data = StudentCreate(
+            email="test@example.com",
+            first_name="John",
+            last_name="Doe",
+            phone_number="+17038590314",
+            proficiency_level="beginner",
+            native_language="es",
+        )
+        assert student_data.native_language == "es"
+
+    # Test wants_daily_message defaults
+    def test_wants_daily_message_default_false(self):
+        """Test that wants_daily_message defaults to False."""
+        student_data = StudentCreate(
+            email="test@example.com",
+            first_name="John",
+            last_name="Doe",
+            phone_number="+17038590314",
+            proficiency_level="beginner",
+        )
+        assert student_data.wants_daily_message is False
+
+    # Test timezone validation
+    def test_timezone_valid_iana_timezones(self):
+        """Test that valid IANA timezones are accepted."""
+        from datetime import time as dt_time
+
+        valid_timezones = [
+            "America/Sao_Paulo",
+            "America/New_York",
+            "Europe/London",
+            "Asia/Tokyo",
+            "UTC",
+        ]
+
+        for tz in valid_timezones:
+            student_data = StudentCreate(
+                email="test@example.com",
+                first_name="John",
+                last_name="Doe",
+                phone_number="+17038590314",
+                proficiency_level="beginner",
+                wants_daily_message=True,
+                timezone=tz,
+                daily_message_time_local=dt_time(9, 0),
+            )
+            assert student_data.timezone == tz
+
+    def test_timezone_invalid_value(self):
+        """Test that invalid timezones are rejected."""
+        from datetime import time as dt_time
+
+        invalid_timezones = [
+            "Invalid/Timezone",
+            "EST",  # Abbreviations not allowed
+            "US/Eastern",  # Deprecated format (though some might still work)
+            "Not_A_Timezone",
+        ]
+
+        for tz in invalid_timezones:
+            with pytest.raises(ValidationError, match="Invalid timezone"):
+                StudentCreate(
+                    email="test@example.com",
+                    first_name="John",
+                    last_name="Doe",
+                    phone_number="+17038590314",
+                    proficiency_level="beginner",
+                    wants_daily_message=True,
+                    timezone=tz,
+                    daily_message_time_local=dt_time(9, 0),
+                )
+
+    # Test wants_daily_message cross-field validation
+    def test_wants_daily_message_requires_timezone(self):
+        """Test that wants_daily_message=True requires timezone."""
+        from datetime import time as dt_time
+
+        with pytest.raises(ValidationError, match="timezone is required"):
+            StudentCreate(
+                email="test@example.com",
+                first_name="John",
+                last_name="Doe",
+                phone_number="+17038590314",
+                proficiency_level="beginner",
+                wants_daily_message=True,
+                daily_message_time_local=dt_time(9, 0),
+                # timezone missing
+            )
+
+    def test_wants_daily_message_requires_time(self):
+        """Test that wants_daily_message=True requires daily_message_time_local."""
+        with pytest.raises(ValidationError, match="daily_message_time_local is required"):
+            StudentCreate(
+                email="test@example.com",
+                first_name="John",
+                last_name="Doe",
+                phone_number="+17038590314",
+                proficiency_level="beginner",
+                wants_daily_message=True,
+                timezone="America/Sao_Paulo",
+                # daily_message_time_local missing
+            )
+
+    def test_wants_daily_message_false_allows_missing_fields(self):
+        """Test that wants_daily_message=False allows missing timezone and time."""
+        student_data = StudentCreate(
+            email="test@example.com",
+            first_name="John",
+            last_name="Doe",
+            phone_number="+17038590314",
+            proficiency_level="beginner",
+            wants_daily_message=False,
+            # timezone and daily_message_time_local not provided
+        )
+        assert student_data.wants_daily_message is False
+        assert student_data.timezone is None
+        assert student_data.daily_message_time_local is None
+
+    def test_daily_message_time_accepts_any_valid_time(self):
+        """Test that daily_message_time_local accepts any valid time."""
+        from datetime import time as dt_time
+
+        test_times = [
+            dt_time(0, 0),      # Midnight
+            dt_time(6, 30),     # Morning
+            dt_time(12, 0),     # Noon
+            dt_time(18, 45),    # Evening
+            dt_time(23, 59),    # Late night
+        ]
+
+        for test_time in test_times:
+            student_data = StudentCreate(
+                email="test@example.com",
+                first_name="John",
+                last_name="Doe",
+                phone_number="+17038590314",
+                proficiency_level="beginner",
+                wants_daily_message=True,
+                timezone="America/Sao_Paulo",
+                daily_message_time_local=test_time,
+            )
+            assert student_data.daily_message_time_local == test_time
+
+    # Test StudentUpdate with messaging preferences
+    def test_update_proficiency_level(self):
+        """Test updating proficiency_level in StudentUpdate."""
+        update_data = StudentUpdate(proficiency_level="intermediate")
+        assert update_data.proficiency_level == "intermediate"
+
+    def test_update_proficiency_level_invalid(self):
+        """Test that invalid proficiency_level is rejected in StudentUpdate."""
+        with pytest.raises(ValidationError, match="Proficiency level must be one of"):
+            StudentUpdate(proficiency_level="expert")
+
+    def test_update_timezone_valid(self):
+        """Test updating timezone with valid IANA timezone."""
+        update_data = StudentUpdate(timezone="Europe/Paris")
+        assert update_data.timezone == "Europe/Paris"
+
+    def test_update_timezone_invalid(self):
+        """Test that invalid timezone is rejected in StudentUpdate."""
+        with pytest.raises(ValidationError, match="Invalid timezone"):
+            StudentUpdate(timezone="Invalid/Zone")
+
+    # Test service-level validation for updates
+    @pytest.mark.asyncio
+    async def test_update_wants_daily_message_requires_fields(
+        self, service, mock_repository, sample_student
+    ):
+        """Test that updating wants_daily_message=True validates required fields."""
+        from datetime import time as dt_time
+
+        # Student exists but doesn't have timezone/time set
+        sample_student.wants_daily_message = False
+        sample_student.timezone = None
+        sample_student.daily_message_time_local = None
+        mock_repository.get.return_value = sample_student
+
+        # Try to update wants_daily_message=True without providing timezone/time
+        update_data = StudentUpdate(wants_daily_message=True)
+
+        with pytest.raises(ValueError, match="timezone is required"):
+            await service.update_student(1, update_data)
+
+    @pytest.mark.asyncio
+    async def test_update_wants_daily_message_with_existing_fields(
+        self, service, mock_repository, sample_student
+    ):
+        """Test updating wants_daily_message=True when fields already exist."""
+        from datetime import time as dt_time
+
+        # Student already has timezone and time configured
+        sample_student.timezone = "America/Sao_Paulo"
+        sample_student.daily_message_time_local = dt_time(9, 0)
+        sample_student.wants_daily_message = False
+        mock_repository.get.return_value = sample_student
+        mock_repository.update.return_value = sample_student
+
+        # Update wants_daily_message=True (should succeed because fields exist)
+        update_data = StudentUpdate(wants_daily_message=True)
+        result = await service.update_student(1, update_data)
+
+        assert result == sample_student
+        mock_repository.update.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_update_wants_daily_message_with_provided_fields(
+        self, service, mock_repository, sample_student
+    ):
+        """Test updating wants_daily_message=True with timezone and time in same request."""
+        from datetime import time as dt_time
+
+        # Student doesn't have timezone/time
+        sample_student.timezone = None
+        sample_student.daily_message_time_local = None
+        mock_repository.get.return_value = sample_student
+        mock_repository.update.return_value = sample_student
+
+        # Update wants_daily_message=True and provide required fields
+        update_data = StudentUpdate(
+            wants_daily_message=True,
+            timezone="America/New_York",
+            daily_message_time_local=dt_time(10, 30),
+        )
+        result = await service.update_student(1, update_data)
+
+        assert result == sample_student
+        mock_repository.update.assert_called_once()

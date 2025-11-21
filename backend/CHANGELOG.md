@@ -5,6 +5,192 @@ All notable changes to the XOXO Education Backend will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## \[0.4.0\] - 2025-11-21
+
+### Added - Student Messaging Preferences
+
+#### 📊 Data Modeling for Future AI Messaging
+
+This release focuses exclusively on extending the Student domain with data fields needed to support future daily AI-generated WhatsApp message delivery. **NO messaging logic, NO AI integration, NO scheduling** - only data modeling and validation.
+
+#### 🎯 New Student Fields (Messaging Preferences)
+
+**Proficiency Level**
+
+* `proficiency_level` (VARCHAR, required on creation)
+  * Allowed values: `beginner`, `intermediate`, `advanced`
+  * Python-side validation (no Postgres ENUM)
+  * Case-insensitive validation, normalized to lowercase
+  * Used for future AI content targeting
+
+**Native Language**
+
+* `native_language` (VARCHAR, default: `"pt-BR"`)
+  * Free-form string for flexibility
+  * Will be used for bilingual explanations in future messaging
+  * Default reflects primary student demographic (Brazilian Portuguese speakers)
+
+**Daily Message Opt-In**
+
+* `wants_daily_message` (BOOLEAN, default: `false`)
+  * Opt-in model for daily messaging
+  * When `true`, requires `timezone` and `daily_message_time_local`
+
+**Scheduling Preferences**
+
+* `daily_message_time_local` (TIME, nullable)
+  * Preferred time for daily message in student's local timezone
+  * Accepts any valid time (00:00 - 23:59)
+  * Required when `wants_daily_message=true`
+* `timezone` (VARCHAR, nullable)
+  * IANA timezone identifier (e.g., `America/Sao_Paulo`, `America/New_York`)
+  * Strict validation using Python's `zoneinfo`
+  * Required when `wants_daily_message=true`
+
+#### ✅ Validation & Business Rules
+
+**Schema-Level Validation** (`app/schemas/student.py`)
+
+* Proficiency level must be one of: `beginner`, `intermediate`, `advanced`
+* Timezone must be valid IANA timezone (strict `zoneinfo` validation)
+* Cross-field validation: If `wants_daily_message=true` → `timezone` and `daily_message_time_local` required
+* All validation in `StudentCreate` and `StudentUpdate` schemas
+
+**Service-Level Validation** (`app/services/student.py`)
+
+* When updating `wants_daily_message` to `true`, validates that timezone/time are set
+* Checks both update data and existing student record to ensure completeness
+* Raises `ValueError` with clear error messages for validation failures
+
+#### 🏗️ Architecture Changes
+
+**Models** (`app/models/student.py`)
+
+* Added 5 new columns to Student model
+* All fields use appropriate SQLAlchemy types (String, Boolean, Time)
+* Includes database-level comments for documentation
+
+**Schemas** (`app/schemas/student.py`)
+
+* `StudentBase`: Added all 5 new fields with descriptions
+* `StudentCreate`:
+  * `proficiency_level` is required
+  * `native_language` defaults to `"pt-BR"`
+  * `wants_daily_message` defaults to `false`
+  * Cross-field validation via `model_post_init`
+* `StudentUpdate`: All fields optional (PATCH-style updates)
+* Field validators for proficiency_level and timezone
+
+**Services** (`app/services/student.py`)
+
+* Enhanced `update_student()` with messaging preference validation
+* Validates cross-field dependencies during updates
+* Clear error messages for validation failures
+
+**Database**
+
+* Alembic migration: `2025_11_21_1701-336052308553_add_student_messaging_prefs.py`
+* Adds 5 columns with safe defaults for existing records
+* Migration uses temporary server defaults, then removes them
+* Clean upgrade and downgrade paths
+
+#### 🧪 Testing
+
+**Unit Tests** (`tests/unit/test_services/test_student.py`)
+
+* 25+ new test cases for Phase 0 functionality:
+  * Proficiency level validation (valid/invalid values, case-insensitivity)
+  * Native language defaults and overrides
+  * Timezone validation (valid IANA timezones, invalid formats)
+  * Cross-field validation for `wants_daily_message`
+  * Time acceptance (all valid times 00:00 - 23:59)
+  * StudentUpdate schema validation
+  * Service-level business rules for updates
+  * Edge cases for updating wants_daily_message
+
+**Test Coverage:**
+
+* ✅ Valid proficiency levels accepted (beginner, intermediate, advanced)
+* ✅ Invalid proficiency levels rejected (expert, novice, etc.)
+* ✅ Proficiency level validation is case-insensitive
+* ✅ proficiency_level required on creation
+* ✅ native_language defaults to "pt-BR"
+* ✅ native_language can be overridden
+* ✅ wants_daily_message defaults to false
+* ✅ Valid IANA timezones accepted
+* ✅ Invalid timezones rejected
+* ✅ wants_daily_message=true requires timezone and time
+* ✅ wants_daily_message=false allows missing fields
+* ✅ Any valid time accepted (00:00 - 23:59)
+* ✅ Update validation with existing student data
+* ✅ Update validation with provided fields in request
+
+#### 📚 Documentation
+
+**README Updates**
+
+* `xoxo/README.md`: Added Phase 0 messaging preferences to Student Tracking section
+* `backend/README.md`: Comprehensive documentation of new fields
+  * Updated Student API examples with messaging preferences
+  * Added required vs optional field documentation
+  * Added validation error examples
+  * Documented timezone format requirements
+  * Included examples with and without messaging preferences
+
+**CHANGELOG**
+
+* Detailed Phase 0 entry (this section!)
+
+#### 🔍 Technical Details
+
+**Migration Strategy**
+
+* Safe defaults used during migration to avoid breaking existing rows
+* `proficiency_level`: server default `"beginner"` during migration
+* `native_language`: server default `"pt-BR"`
+* `wants_daily_message`: server default `false`
+* Server defaults removed after column addition (app-level defaults for future inserts)
+
+**Validation Approach**
+
+* VARCHAR for proficiency_level (not ENUM) for flexibility
+* Strict IANA timezone validation using `zoneinfo`
+* Pydantic v2 validators with `model_post_init` for cross-field checks
+* Service-level validation for update operations
+* Clear, actionable error messages
+
+**Data Integrity**
+
+* Cross-field validation ensures data consistency
+* PATCH-style updates allow partial modifications
+* Timezone validation prevents invalid data at creation time
+* Service layer validates updates against existing state
+
+#### 🚀 Future Phases (Not in This Release)
+
+Phase 0 is **data modeling only**. Future phases will add:
+
+* **Phase 1**: AI content generation logic
+* **Phase 2**: WhatsApp integration
+* **Phase 3**: Scheduling and delivery system
+* **Phase 4**: Analytics and tracking
+
+### Changed
+
+* Student model extended with 5 new fields for messaging preferences
+* Student schemas updated to include messaging fields with validation
+* Student service enhanced with cross-field validation logic
+
+### Technical Notes
+
+* Uses `zoneinfo` (Python 3.9+) for timezone validation
+* All new fields are non-nullable except `daily_message_time_local` and `timezone`
+* Migration is backward-compatible with existing student records
+* No API endpoint changes required (automatic schema updates)
+
+
+---
+
 ## \[0.3.0\] - 2025-11-21
 
 ### Added - Student Tracking System
@@ -125,7 +311,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     * Filtering examples
     * E.164 phone format explanation
   * Project structure updated with student files
-
 * **CHANGELOG.md** - This entry!
 
 #### 🔍 Features
@@ -162,6 +347,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * All database operations are async
 * Repository pattern for data access abstraction
 * Service layer handles business logic and normalization
+
 
 ---
 
@@ -294,8 +480,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * ✅ Inactive user account protection
 
 
----
-
 ## \[0.1.0\] - 2025-11-19
 
 ### Added - Initial Release
@@ -337,8 +521,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * Pre-commit hooks support
 
 
----
-
 ## Future Considerations
 
 ### Potential Enhancements (Not Implemented)
@@ -362,8 +544,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * Account lockout after failed attempts
 
 
----
-
 ## Migration Guide
 
 ### From 0.1.0 to 0.2.0
@@ -371,11 +551,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 **Prerequisites:**
 
 
+
 1. Backup your database
 2. Update dependencies: `poetry install`
 3. Generate secure SECRET_KEY for production
 
 **Migration Steps:**
+
 
 
 1. Run database migration: `alembic upgrade head`
@@ -394,8 +576,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 * None
 
-
----
 
 ## Support
 
