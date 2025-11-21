@@ -42,6 +42,11 @@ docker compose up
 - Soft delete with activation/deactivation
 - Advanced filtering (by name, email, country, active status)
 - E.164 phone number validation
+- Messaging preferences:
+  - English proficiency level tracking
+  - Native language configuration
+  - Daily message opt-in with timezone preferences
+  - Preparation for AI-generated WhatsApp messaging
 
 ### 🏥 Health Monitoring
 - Health check endpoints
