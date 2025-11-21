@@ -87,6 +87,12 @@ This project follows a **layered monolithic architecture** with clear separation
 - Strict E.164 phone number validation
 - Automatic email normalization (lowercase)
 - Pagination support
+- **Messaging preferences**:
+  - English proficiency level tracking (beginner, intermediate, advanced)
+  - Native language configuration (default: pt-BR)
+  - Daily message opt-in with timezone and time preferences
+  - Strict IANA timezone validation
+  - Preparation for future AI-generated WhatsApp messaging
 
 ### 🏥 Health & Monitoring
 - Health check endpoints (`/health`, `/health/db`)
@@ -675,6 +681,7 @@ curl -X DELETE http://localhost:8000/api/v1/users/1 \
 
 #### Create a Student
 
+**Basic Example (no messaging):**
 ```bash
 curl -X POST http://localhost:8000/api/v1/students \
   -H "Authorization: Bearer YOUR_ADMIN_ACCESS_TOKEN" \
@@ -684,7 +691,28 @@ curl -X POST http://localhost:8000/api/v1/students \
     "first_name": "Jane",
     "last_name": "Smith",
     "phone_number": "+17038590314",
+    "proficiency_level": "beginner",
     "country": "USA",
+    "is_active": true
+  }'
+```
+
+**With Messaging Preferences:**
+```bash
+curl -X POST http://localhost:8000/api/v1/students \
+  -H "Authorization: Bearer YOUR_ADMIN_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "student@example.com",
+    "first_name": "Jane",
+    "last_name": "Smith",
+    "phone_number": "+17038590314",
+    "proficiency_level": "intermediate",
+    "native_language": "pt-BR",
+    "wants_daily_message": true,
+    "daily_message_time_local": "09:00:00",
+    "timezone": "America/Sao_Paulo",
+    "country": "Brazil",
     "is_active": true
   }'
 ```
@@ -697,18 +725,37 @@ curl -X POST http://localhost:8000/api/v1/students \
   "first_name": "Jane",
   "last_name": "Smith",
   "phone_number": "+17038590314",
-  "country": "USA",
+  "country": "Brazil",
   "is_active": true,
+  "proficiency_level": "intermediate",
+  "native_language": "pt-BR",
+  "wants_daily_message": true,
+  "daily_message_time_local": "09:00:00",
+  "timezone": "America/Sao_Paulo",
   "created_at": "2025-11-21T17:00:00Z",
   "updated_at": "2025-11-21T17:00:00Z"
 }
 ```
 
+**Required Fields:**
+- `proficiency_level`: Must be one of: `beginner`, `intermediate`, `advanced` (case-insensitive)
+- If `wants_daily_message` is `true`, both `timezone` and `daily_message_time_local` are required
+
+**Optional Fields:**
+- `native_language`: Defaults to `"pt-BR"` if not provided
+- `wants_daily_message`: Defaults to `false` if not provided
+- `timezone`: IANA timezone (e.g., `America/Sao_Paulo`, `America/New_York`, `Europe/London`)
+- `daily_message_time_local`: Time in HH:MM:SS format (e.g., `"09:00:00"`)
+
 **Errors:**
 - `401`: Not authenticated
 - `403`: Not admin
 - `409`: Email or phone number already exists
-- `422`: Validation error (invalid email or phone format)
+- `422`: Validation error:
+  - Invalid email or phone format
+  - Invalid proficiency_level
+  - Invalid timezone (must be valid IANA timezone)
+  - Missing timezone or time when wants_daily_message=true
 
 **Phone Number Format:** Must be E.164 format: `+[country code][number]` (e.g., `+17038590314`)
 
