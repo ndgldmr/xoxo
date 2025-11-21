@@ -18,7 +18,9 @@ class UserBase(BaseModel):
     last_name: str = Field(..., min_length=1, max_length=100, description="Last name")
     phone: Optional[str] = Field(None, max_length=20, description="Phone number")
     is_active: bool = Field(default=True, description="Whether user is active")
-    is_admin: bool = Field(default=False, description="Whether user has admin privileges")
+    is_admin: bool = Field(
+        default=False, description="Whether user has admin privileges"
+    )
 
 
 # Properties to receive on creation
@@ -28,7 +30,7 @@ class UserCreate(UserBase):
     password: str = Field(
         ...,
         min_length=12,
-        description="User password (min 12 chars, must include uppercase, lowercase, digit, special char)"
+        description="User password (min 12 chars, must include uppercase, lowercase, digit, special char)",
     )
 
 
@@ -37,11 +39,17 @@ class UserUpdate(BaseModel):
     """Schema for updating an existing user. All fields are optional."""
 
     email: Optional[EmailStr] = Field(None, description="User's email address")
-    first_name: Optional[str] = Field(None, min_length=1, max_length=100, description="First name")
-    last_name: Optional[str] = Field(None, min_length=1, max_length=100, description="Last name")
+    first_name: Optional[str] = Field(
+        None, min_length=1, max_length=100, description="First name"
+    )
+    last_name: Optional[str] = Field(
+        None, min_length=1, max_length=100, description="Last name"
+    )
     phone: Optional[str] = Field(None, max_length=20, description="Phone number")
     is_active: Optional[bool] = Field(None, description="Whether user is active")
-    is_admin: Optional[bool] = Field(None, description="Whether user has admin privileges")
+    is_admin: Optional[bool] = Field(
+        None, description="Whether user has admin privileges"
+    )
 
 
 # Properties shared by models stored in DB

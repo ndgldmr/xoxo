@@ -6,7 +6,11 @@ from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import AlreadyExistsException, NotFoundException, ValidationException
+from app.core.exceptions import (
+    AlreadyExistsException,
+    NotFoundException,
+    ValidationException,
+)
 from app.core.security import hash_password, validate_password_strength
 from app.models.user import User
 from app.repositories.user import UserRepository
@@ -101,12 +105,16 @@ class UserService:
         """
         # Business logic: Check if email already exists
         if await self.repository.email_exists(user_data.email):
-            raise AlreadyExistsException(f"User with email {user_data.email} already exists")
+            raise AlreadyExistsException(
+                f"User with email {user_data.email} already exists"
+            )
 
         # Validate password strength
         is_valid, error_message = validate_password_strength(user_data.password)
         if not is_valid:
-            raise ValidationException(error_message or "Password does not meet security requirements")
+            raise ValidationException(
+                error_message or "Password does not meet security requirements"
+            )
 
         # Hash the password
         hashed_password = hash_password(user_data.password)
@@ -118,7 +126,7 @@ class UserService:
 
         # Create user via repository with modified data
         # We pass a dict instead of the schema since we've modified the data
-        from app.schemas.user import UserInDB
+
         db_obj = self.repository.model(**user_dict)
         self.db.add(db_obj)
         await self.db.commit()

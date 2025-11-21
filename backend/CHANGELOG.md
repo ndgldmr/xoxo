@@ -5,6 +5,166 @@ All notable changes to the XOXO Education Backend will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## \[0.3.0\] - 2025-11-21
+
+### Added - Student Tracking System
+
+#### 👨‍🎓 Student Management
+
+* **Student Model** (`app/models/student.py`)
+  * Students are NOT system users (no authentication/login)
+  * Fields: `id`, `email`, `first_name`, `last_name`, `phone_number`, `country`, `is_active`
+  * Automatic timestamp tracking (`created_at`, `updated_at`)
+  * Email uniqueness constraint with indexing
+  * Phone number uniqueness constraint with indexing
+  * Soft delete support via `is_active` flag
+* **Admin-Only Access**
+  * All student operations require admin authentication
+  * Full CRUD operations managed by administrators
+  * Students cannot access the system directly
+
+#### 🔌 API Endpoints
+
+**Student Management** (`/api/v1/students`) - All endpoints require admin authentication
+
+* `POST /` - Create student with E.164 phone validation
+* `GET /` - List students with pagination and filtering
+  * Filter by: `active_only`, `email`, `name` (first/last), `country`
+  * Pagination: `skip`, `limit` (max 1000)
+* `GET /{student_id}` - Get student by ID
+* `PUT /{student_id}` - Update student (all fields optional)
+* `DELETE /{student_id}` - Soft delete student (sets `is_active=False`)
+* `POST /{student_id}/activate` - Reactivate deactivated student
+
+#### 🏗️ Architecture Components
+
+**Models** (`app/models/`)
+
+* `student.py` - Student ORM model with `Base` + `TimestampMixin`
+  * Unique email and phone number constraints
+  * Indexed fields for query performance
+  * `full_name` property for convenience
+
+**Repositories** (`app/repositories/`)
+
+* `student.py` - StudentRepository extending BaseRepository
+  * `get_by_email()` - Find student by email
+  * `get_by_phone()` - Find student by phone number
+  * `get_active_students()` - Filter active students
+  * `get_with_filters()` - Advanced filtering with pagination
+  * `email_exists()` - Check email uniqueness (with exclusion for updates)
+  * `phone_exists()` - Check phone uniqueness (with exclusion for updates)
+
+**Services** (`app/services/`)
+
+* `student.py` - StudentService business logic
+  * Email normalization (lowercase, trim)
+  * Phone number normalization (trim)
+  * Uniqueness validation for email and phone
+  * Soft delete implementation
+  * Filter orchestration
+
+**Schemas** (`app/schemas/`)
+
+* `student.py` - Pydantic validation schemas
+  * `StudentBase` - Shared properties
+  * `StudentCreate` - Creation with E.164 phone validation
+  * `StudentUpdate` - Optional update fields with E.164 validation
+  * `Student` - Response schema with timestamps
+  * E.164 regex validation: `^\+[1-9]\d{1,14}$`
+
+**API** (`app/api/v1/endpoints/`)
+
+* `students.py` - Student endpoints with comprehensive documentation
+  * Query parameter validation
+  * Admin authentication enforcement
+  * Detailed error responses
+
+**Database**
+
+* Alembic migration: `2025_11_21_1749-f7cef4dac3fa_add_students_table.py`
+* Creates `students` table with indexes on `id`, `email`, `phone_number`
+* Unique constraints on `email` and `phone_number`
+
+#### ✅ Validation
+
+* **Email Validation**
+  * EmailStr type with Pydantic validation
+  * Automatic lowercase normalization
+  * Uniqueness enforcement at database and service layers
+* **Phone Number Validation**
+  * Strict E.164 format: `+[country code][number]`
+  * Regex pattern: `^\+[1-9]\d{1,14}$`
+  * Examples: `+17038590314` (US), `+447911123456` (UK)
+  * Uniqueness enforcement
+  * Clear error messages for invalid formats
+* **Country Field**
+  * Optional string field (max 100 chars)
+  * No format enforcement (future enhancement opportunity)
+
+#### 🧪 Testing
+
+* **Unit Tests** (`tests/unit/test_services/test_student.py`)
+  * 15+ test cases covering StudentService
+  * Tests for CRUD operations
+  * Tests for email normalization (uppercase → lowercase)
+  * Tests for phone number validation (valid/invalid E.164 formats)
+  * Tests for uniqueness constraints (email and phone)
+  * Tests for soft delete behavior
+  * Tests for filtering functionality
+  * Mocked dependencies for isolated testing
+
+#### 📚 Documentation
+
+* **README.md Updates**
+  * `xoxo/README.md` - Added Student Tracking to features list
+  * `backend/README.md` - Complete Student API documentation
+    * API endpoint examples with curl commands
+    * Request/response samples
+    * Error code documentation
+    * Filtering examples
+    * E.164 phone format explanation
+  * Project structure updated with student files
+
+* **CHANGELOG.md** - This entry!
+
+#### 🔍 Features
+
+* **Advanced Filtering**
+  * Filter by active status
+  * Search by email (exact match, case-insensitive)
+  * Search by name (substring match in first or last name)
+  * Filter by country (exact match, case-insensitive)
+  * Combine multiple filters
+  * Pagination support (skip/limit)
+* **Data Integrity**
+  * Email and phone uniqueness enforced
+  * Automatic timestamp management
+  * Soft delete preserves data
+  * Update validations prevent conflicts
+* **User Experience**
+  * Clear validation error messages
+  * E.164 format guidance
+  * Comprehensive API documentation
+  * Filtering flexibility
+
+### Changed
+
+* `app/db/base.py` - Added Student model import for Alembic
+* `app/api/v1/router.py` - Registered students router
+
+### Technical Details
+
+* Students use `int` autoincrement ID (consistent with Users)
+* Email stored in lowercase for consistency
+* Phone numbers stored as provided (after E.164 validation)
+* Soft delete via `is_active` boolean (default `True`)
+* All database operations are async
+* Repository pattern for data access abstraction
+* Service layer handles business logic and normalization
+
+---
+
 ## \[0.2.0\] - 2025-11-20
 
 ### Added - Authentication & Authorization System

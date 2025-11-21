@@ -49,9 +49,7 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         """
         return await self.db.get(self.model, id)
 
-    async def get_multi(
-        self, *, skip: int = 0, limit: int = 100
-    ) -> list[ModelType]:
+    async def get_multi(self, *, skip: int = 0, limit: int = 100) -> list[ModelType]:
         """
         Get multiple records with pagination.
 

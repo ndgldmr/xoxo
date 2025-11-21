@@ -64,7 +64,8 @@ class Settings(BaseSettings):
         default=30, description="Access token expiration time in minutes"
     )
     REFRESH_TOKEN_EXPIRE_MINUTES: int = Field(
-        default=10080, description="Refresh token expiration time in minutes (7 days default)"
+        default=10080,
+        description="Refresh token expiration time in minutes (7 days default)",
     )
 
     @field_validator("SECRET_KEY")
@@ -73,7 +74,10 @@ class Settings(BaseSettings):
         """Validate SECRET_KEY is not using default in production."""
         # Access other fields via info.data
         environment = info.data.get("ENVIRONMENT", "development")
-        if environment == "production" and v == "change-me-in-production-to-a-random-secret-key":
+        if (
+            environment == "production"
+            and v == "change-me-in-production-to-a-random-secret-key"
+        ):
             raise ValueError(
                 "SECRET_KEY must be changed in production! "
                 "Generate a secure key with: python -c 'import secrets; print(secrets.token_urlsafe(32))'"
