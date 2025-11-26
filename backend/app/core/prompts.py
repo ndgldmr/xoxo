@@ -86,8 +86,8 @@ def build_message_generation_prompt(
         [
             "CRITICAL: You MUST respond with ONLY valid JSON in this exact format:",
             "{",
-            '  "subject": "your word or phrase",',
-            '  "definition": "clear, simple definition",',
+            '  "subject": "Your word or phrase",',
+            '  "definition": "Clear, simple definition",',
             '  "example": "A natural example sentence showing usage.",',
             '  "usage_tips": "Helpful tips about when and how to use it.",',
             '  "cultural_notes": "Optional cultural context or null"',
