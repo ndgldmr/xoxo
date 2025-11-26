@@ -94,6 +94,24 @@ This project follows a **layered monolithic architecture** with clear separation
   - Strict IANA timezone validation
   - Preparation for future AI-generated WhatsApp messaging
 
+### 📝 Message of the Day (MOTD)
+- Full CRUD operations for daily English learning messages (admin-only)
+- **One message per day** - unique message_date constraint
+- **Unique subjects** - each English word/phrase used only once
+- Soft delete with activation/deactivation support
+- Category-based organization (e.g., everyday_phrases, black_history_month)
+- Automatic category normalization to slug format
+- **Message content** (canonical English):
+  - Subject: English word or phrase
+  - Definition: Canonical English definition
+  - Example: English usage example
+  - Usage tips: Guidance on proper usage
+  - Cultural notes: Optional cultural/context information
+- Filtering by category, date, and active status
+- Pagination support with default date-descending sort
+- **Current scope**: Data model and admin CRUD API
+- **Future enhancements**: AI-powered content generation, scheduled delivery, WhatsApp integration
+
 ### 🏥 Health & Monitoring
 - Health check endpoints (`/health`, `/health/db`)
 - Database connectivity monitoring
@@ -123,6 +141,7 @@ backend/
 │   │       ├── endpoints/      # API endpoints
 │   │       │   ├── auth.py     # 🔐 Authentication endpoints
 │   │       │   ├── health.py
+│   │       │   ├── messages.py # 📝 Message of the Day management
 │   │       │   ├── students.py # 👨‍🎓 Student management
 │   │       │   └── users.py    # 🔒 Protected user management
 │   │       └── router.py       # API router aggregation
@@ -136,32 +155,40 @@ backend/
 │   │   ├── base_class.py      # Base ORM class
 │   │   └── session.py         # Async session management
 │   ├── models/                # SQLAlchemy models
+│   │   ├── message.py         # 📝 Message of the Day model
 │   │   ├── student.py         # 👨‍🎓 Student model
 │   │   └── user.py            # User with auth fields
 │   ├── repositories/          # Data access layer
 │   │   ├── base.py
+│   │   ├── message.py         # 📝 Message repository
 │   │   ├── student.py         # 👨‍🎓 Student repository
 │   │   └── user.py
 │   ├── schemas/               # Pydantic schemas
 │   │   ├── auth.py            # 🔐 Auth schemas
+│   │   ├── message.py         # 📝 Message schemas
 │   │   ├── student.py         # 👨‍🎓 Student schemas
 │   │   └── user.py            # User schemas with password
 │   ├── services/              # Business logic
 │   │   ├── auth.py            # 🔐 Auth service
+│   │   ├── message.py         # 📝 Message service
 │   │   ├── student.py         # 👨‍🎓 Student service
 │   │   └── user.py            # User service with password hashing
 │   └── main.py                # FastAPI app entry point
 ├── alembic/                   # Database migrations
 │   ├── versions/              # Migration files
 │   │   ├── 2025_11_19_*_auth.py
-│   │   └── 2025_11_21_*_add_students_table.py
+│   │   ├── 2025_11_21_*_add_students_table.py
+│   │   └── 2025_11_25_*_create_messages_table.py
 │   └── env.py
 ├── tests/
 │   ├── conftest.py           # Pytest fixtures (with auth fixtures)
 │   └── unit/
+│       ├── test_api/
+│       │   └── test_messages.py  # 📝 Message schema tests
 │       ├── test_security.py  # 🔐 Auth unit tests (20 tests)
 │       └── test_services/
-│           └── test_student.py  # 👨‍🎓 Student service tests
+│           ├── test_message.py   # 📝 Message service tests
+│           └── test_student.py   # 👨‍🎓 Student service tests
 ├── scripts/                   # Utility scripts
 │   └── create_admin.py       # 🔐 Admin user creation
 ├── .env.example              # Environment variables template
@@ -825,6 +852,121 @@ curl -X POST http://localhost:8000/api/v1/students/1/activate \
 ```
 
 **Note:** Reactivates a previously deactivated student.
+
+### Message of the Day Management (Admin Only)
+
+**Note:** All message management endpoints require admin authentication. Messages are canonical English learning content.
+
+#### Create a Message
+
+```bash
+curl -X POST http://localhost:8000/api/v1/messages \
+  -H "Authorization: Bearer YOUR_ADMIN_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message_date": "2025-11-25",
+    "category": "Everyday Phrases",
+    "subject": "Hello",
+    "definition": "A greeting or expression of goodwill used when meeting or acknowledging someone.",
+    "example": "Hello! How are you today?",
+    "usage_tips": "Use this as a friendly greeting in both formal and informal situations. Typically followed by a question about wellbeing.",
+    "cultural_notes": "One of the most common greetings in English-speaking countries. Appropriate for all contexts."
+  }'
+```
+
+**Response (201):**
+```json
+{
+  "id": 1,
+  "message_date": "2025-11-25",
+  "category": "everyday_phrases",
+  "subject": "Hello",
+  "definition": "A greeting or expression of goodwill...",
+  "example": "Hello! How are you today?",
+  "usage_tips": "Use this as a friendly greeting...",
+  "cultural_notes": "One of the most common greetings...",
+  "is_active": true,
+  "created_at": "2025-11-25T12:00:00Z",
+  "updated_at": "2025-11-25T12:00:00Z"
+}
+```
+
+**Business Rules:**
+- `subject` must be globally unique across all messages
+- `message_date` must be unique (one message per day)
+- `category` is automatically normalized to slug format (e.g., "Everyday Phrases" → "everyday_phrases")
+- `cultural_notes` is optional; all other content fields are required
+
+**Errors:**
+- `401`: Not authenticated
+- `403`: Not admin
+- `409`: Subject or message_date already exists
+- `422`: Validation error (empty required fields, invalid date)
+
+#### Get All Messages (with Filters)
+
+```bash
+# Get all active messages with pagination
+curl http://localhost:8000/api/v1/messages?skip=0&limit=100 \
+  -H "Authorization: Bearer YOUR_ADMIN_ACCESS_TOKEN"
+
+# Get only active messages (default)
+curl http://localhost:8000/api/v1/messages?active_only=true \
+  -H "Authorization: Bearer YOUR_ADMIN_ACCESS_TOKEN"
+
+# Filter by category
+curl http://localhost:8000/api/v1/messages?category=everyday_phrases \
+  -H "Authorization: Bearer YOUR_ADMIN_ACCESS_TOKEN"
+
+# Filter by exact message_date
+curl http://localhost:8000/api/v1/messages?message_date=2025-11-25 \
+  -H "Authorization: Bearer YOUR_ADMIN_ACCESS_TOKEN"
+
+# Combine multiple filters
+curl "http://localhost:8000/api/v1/messages?active_only=true&category=black_history_month&limit=50" \
+  -H "Authorization: Bearer YOUR_ADMIN_ACCESS_TOKEN"
+```
+
+**Note:** Results are ordered by `message_date` descending (most recent first).
+
+#### Get Message by ID
+
+```bash
+curl http://localhost:8000/api/v1/messages/1 \
+  -H "Authorization: Bearer YOUR_ADMIN_ACCESS_TOKEN"
+```
+
+#### Update Message
+
+```bash
+curl -X PUT http://localhost:8000/api/v1/messages/1 \
+  -H "Authorization: Bearer YOUR_ADMIN_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "definition": "Updated definition: A common greeting or expression of goodwill.",
+    "cultural_notes": "Updated notes: Universal greeting in English."
+  }'
+```
+
+**Note:** All fields are optional and fully editable, including `subject` and `message_date`. Uniqueness constraints still apply.
+
+#### Deactivate Message (Soft Delete)
+
+```bash
+curl -X DELETE http://localhost:8000/api/v1/messages/1 \
+  -H "Authorization: Bearer YOUR_ADMIN_ACCESS_TOKEN"
+```
+
+**Note:** This performs a soft delete by setting `is_active=False`. The message record remains in the database.
+
+#### Activate Message
+
+```bash
+curl -X POST http://localhost:8000/api/v1/messages/1/activate \
+  -H "Authorization: Bearer YOUR_ADMIN_ACCESS_TOKEN"
+```
+
+**Note:** Reactivates a previously deactivated message.
 
 ## Adding New Features
 

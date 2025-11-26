@@ -5,6 +5,204 @@ All notable changes to the XOXO Education Backend will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## \[0.5.0\] - 2025-11-25
+
+### Added - Message of the Day
+
+#### 📝 Data Model & CRUD for Daily English Messages
+
+This release implements the Message of the Day (MOTD) feature: the complete data model, business logic, and admin CRUD API for daily English learning messages. **NO AI integration, NO scheduling, NO WhatsApp delivery** - only the foundational data layer.
+
+#### 🎯 New Message Model
+
+**Core Message Entity** (`app/models/message.py`)
+
+* `id` (INTEGER, PK, auto-increment)
+* `message_date` (DATE, UNIQUE, indexed) - Logical calendar day for this message
+* `category` (VARCHAR(100), nullable, indexed) - Optional semantic category (normalized to slug format)
+* `subject` (VARCHAR(255), UNIQUE, indexed) - English word/phrase (globally unique)
+* `definition` (TEXT, required) - Canonical English definition
+* `example` (TEXT, required) - English example usage
+* `usage_tips` (TEXT, required) - English usage tips
+* `cultural_notes` (TEXT, nullable) - Optional cultural/context notes in English
+* `is_active` (BOOLEAN, default=true) - Soft delete flag
+* `created_at` (TIMESTAMP, auto) - Creation timestamp
+* `updated_at` (TIMESTAMP, auto) - Last update timestamp
+
+**Business Rules:**
+
+* ✅ **One message per day**: `message_date` enforced as UNIQUE at DB level
+* ✅ **Unique subjects**: `subject` enforced as UNIQUE at DB level (each English word/phrase used only once)
+* ✅ **Soft delete**: Messages are deactivated (`is_active=false`), not deleted
+* ✅ **Category normalization**: Categories are automatically normalized to slug format (e.g., "Black History Month" → "black_history_month")
+
+#### ✅ Validation & Business Logic
+
+**Schema-Level Validation** (`app/schemas/message.py`)
+
+* `MessageCreate`: All required fields validated for non-empty content
+  * `subject`: Stripped whitespace, must be non-empty
+  * `definition`, `example`, `usage_tips`: Required, must be non-empty after stripping
+  * `cultural_notes`: Optional (nullable)
+  * `category`: Normalized to slug format (lowercase, underscores, alphanumeric + underscore only)
+* `MessageUpdate`: All fields optional (PATCH-style updates)
+  * Same validation as `MessageCreate` when fields are provided
+  * Supports updating all fields including `subject` and `message_date`
+
+**Service-Level Validation** (`app/services/message.py`)
+
+* Enforces `subject` uniqueness with friendly error messages (raises `AlreadyExistsException`)
+* Enforces `message_date` uniqueness with clear "one message per day" error
+* Normalizes `subject` by stripping whitespace before DB operations
+* Handles soft delete and reactivation operations
+* Validates uniqueness on updates (excludes current message ID from checks)
+
+#### 🏗️ Architecture Implementation
+
+**Repository Layer** (`app/repositories/message.py`)
+
+* Extends `BaseRepository[Message, MessageCreate, MessageUpdate]`
+* Custom query methods:
+  * `get_by_date(message_date)` - Retrieve message for specific date
+  * `get_by_subject(subject)` - Retrieve message by subject
+  * `get_active_messages(skip, limit)` - Get all active messages
+  * `get_with_filters(...)` - Advanced filtering with pagination
+  * `subject_exists(subject, exclude_id)` - Check subject uniqueness
+  * `date_exists(message_date, exclude_id)` - Check date uniqueness
+* Default ordering: `message_date` descending (most recent first)
+
+**Service Layer** (`app/services/message.py`)
+
+* `MessageService` with complete CRUD operations
+* Business logic methods:
+  * `create_message(data)` - Create with uniqueness validation
+  * `update_message(id, data)` - Update with uniqueness checks
+  * `delete_message(id)` - Soft delete (set `is_active=false`)
+  * `activate_message(id)` - Reactivate deleted message
+  * `get_message(id)` - Retrieve by ID (raises `NotFoundException`)
+  * `get_message_by_date(date)` - Retrieve by date
+  * `get_message_by_subject(subject)` - Retrieve by subject
+  * `get_messages(...)` - List with filters and pagination
+* Designed for future AI/scheduler integration
+
+**API Layer** (`app/api/v1/endpoints/messages.py`)
+
+* Admin-only endpoints (requires `require_admin` dependency):
+  * `POST /messages/` - Create message (201 Created)
+  * `GET /messages/` - List messages with filters
+  * `GET /messages/{id}` - Retrieve single message
+  * `PUT /messages/{id}` - Update message (all fields editable)
+  * `DELETE /messages/{id}` - Soft delete message
+  * `POST /messages/{id}/activate` - Reactivate message
+* Query parameters for filtering:
+  * `skip`, `limit` - Pagination (default: 0, 100)
+  * `active_only` - Filter active/inactive (default: true)
+  * `category` - Exact category match
+  * `message_date` - Exact date match (format: YYYY-MM-DD)
+* Comprehensive OpenAPI documentation with examples
+
+**Database**
+
+* Alembic migration: `2025_11_25_0000-c4e8a2f9b1d3_create_messages_table.py`
+* Creates `messages` table with all fields and constraints
+* Indexes on: `id`, `message_date` (unique), `category`, `subject` (unique)
+* Clean upgrade and downgrade paths
+
+#### 🧪 Testing
+
+**Unit Tests** (`tests/unit/test_services/test_message.py`)
+
+* 20+ test cases covering MessageService:
+  * ✅ Successful message creation
+  * ✅ Duplicate subject rejection (AlreadyExistsException)
+  * ✅ Duplicate date rejection (AlreadyExistsException)
+  * ✅ Subject normalization (whitespace stripping)
+  * ✅ Successful message update
+  * ✅ Update with subject/date uniqueness validation
+  * ✅ Update without triggering checks when fields unchanged
+  * ✅ Soft delete functionality
+  * ✅ Message activation
+  * ✅ Get message by ID (success and not found)
+  * ✅ Get message by date
+  * ✅ Get message by subject
+  * ✅ List messages with filters
+
+**Schema Tests** (`tests/unit/test_api/test_messages.py`)
+
+* 12+ test cases covering Pydantic schemas:
+  * ✅ Valid MessageCreate with all fields
+  * ✅ Category normalization (various formats)
+  * ✅ Empty subject rejection
+  * ✅ Empty required field rejection
+  * ✅ Optional cultural_notes
+  * ✅ MessageUpdate partial updates
+  * ✅ Default values (is_active=true, category=None)
+  * ✅ Invalid category rejection (special chars only)
+
+#### 📚 Documentation
+
+**README Updates**
+
+* `backend/README.md`:
+  * Added "Message of the Day (MOTD)" section to Features
+  * Updated Project Structure with message files
+  * Added comprehensive API usage examples:
+    - Create message with curl examples
+    - List messages with all filter combinations
+    - Update message (partial updates)
+    - Soft delete and activate operations
+  * Documented business rules and error responses
+* `xoxo/README.md`:
+  * Added Message of the Day to Features section
+  * Updated project description
+
+**CHANGELOG**
+
+* Detailed entry (this section!)
+
+#### 🔍 Design for Future Enhancements
+
+**Foundation Enables:**
+
+* **AI Integration**:
+  * MessageService provides clean interface for AI-generated content
+  * Category system ready for AI-driven classification
+  * Subject uniqueness ensures no duplicate content
+  * One-message-per-day constraint enables reliable scheduling
+
+* **Scheduler & Delivery**:
+  * Repository queries support date-based lookups
+  * `get_by_date()` enables scheduler to fetch daily message
+  * Active/inactive flag allows draft management
+  * Message content structure ready for personalization layer
+
+* **WhatsApp Integration**:
+  * Canonical English content ready for student-level personalization
+  * Student proficiency levels will shape delivery
+  * Message structure supports bilingual rendering
+
+#### 🚀 Migration & Deployment
+
+**Running the Migration:**
+
+```bash
+# In Docker
+docker compose exec app alembic upgrade head
+
+# Locally
+alembic upgrade head
+```
+
+**Rolling Back:**
+
+```bash
+alembic downgrade -1
+```
+
+**No Breaking Changes**: This is a new feature with no impact on existing functionality.
+
+---
+
 ## \[0.4.0\] - 2025-11-21
 
 ### Added - Student Messaging Preferences
@@ -98,7 +296,7 @@ This release focuses exclusively on extending the Student domain with data field
 
 **Unit Tests** (`tests/unit/test_services/test_student.py`)
 
-* 25+ new test cases for Phase 0 functionality:
+* 25+ new test cases for student messaging preferences functionality:
   * Proficiency level validation (valid/invalid values, case-insensitivity)
   * Native language defaults and overrides
   * Timezone validation (valid IANA timezones, invalid formats)
@@ -129,7 +327,7 @@ This release focuses exclusively on extending the Student domain with data field
 
 **README Updates**
 
-* `xoxo/README.md`: Added Phase 0 messaging preferences to Student Tracking section
+* `xoxo/README.md`: Added messaging preferences to Student Tracking section
 * `backend/README.md`: Comprehensive documentation of new fields
   * Updated Student API examples with messaging preferences
   * Added required vs optional field documentation
@@ -139,7 +337,7 @@ This release focuses exclusively on extending the Student domain with data field
 
 **CHANGELOG**
 
-* Detailed Phase 0 entry (this section!)
+* Detailed entry (this section!)
 
 #### 🔍 Technical Details
 
@@ -166,14 +364,14 @@ This release focuses exclusively on extending the Student domain with data field
 * Timezone validation prevents invalid data at creation time
 * Service layer validates updates against existing state
 
-#### 🚀 Future Phases (Not in This Release)
+#### 🚀 Future Enhancements
 
-Phase 0 is **data modeling only**. Future phases will add:
+This release is **data modeling only**. Future enhancements will add:
 
-* **Phase 1**: AI content generation logic
-* **Phase 2**: WhatsApp integration
-* **Phase 3**: Scheduling and delivery system
-* **Phase 4**: Analytics and tracking
+* AI content generation logic
+* WhatsApp integration
+* Scheduling and delivery system
+* Analytics and tracking
 
 ### Changed
 
