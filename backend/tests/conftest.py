@@ -7,6 +7,7 @@ from collections.abc import AsyncGenerator, Generator
 from typing import Any
 
 import pytest
+import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -45,7 +46,7 @@ def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
     loop.close()
 
 
-@pytest.fixture(scope="function")
+@pytest_asyncio.fixture(scope="function")
 async def db_session() -> AsyncGenerator[AsyncSession, None]:
     """
     Create a fresh database session for each test.
@@ -64,7 +65,7 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
         await conn.run_sync(Base.metadata.drop_all)
 
 
-@pytest.fixture(scope="function")
+@pytest_asyncio.fixture(scope="function")
 async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
     """
     Create an async HTTP client for testing API endpoints.
@@ -116,7 +117,7 @@ def sample_admin_data() -> dict[str, Any]:
     }
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def test_user(db_session: AsyncSession, sample_user_data: dict[str, Any]):
     """Create a test user in the database."""
     from app.models.user import User
@@ -140,7 +141,7 @@ async def test_user(db_session: AsyncSession, sample_user_data: dict[str, Any]):
     return user
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def test_admin(db_session: AsyncSession, sample_admin_data: dict[str, Any]):
     """Create a test admin user in the database."""
     from app.models.user import User
@@ -164,7 +165,7 @@ async def test_admin(db_session: AsyncSession, sample_admin_data: dict[str, Any]
     return admin
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def user_token(test_user):
     """Generate access token for test user."""
     from app.core.security import create_access_token
@@ -172,9 +173,21 @@ async def user_token(test_user):
     return create_access_token(subject=test_user.id, is_admin=test_user.is_admin)
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def admin_token(test_admin):
     """Generate access token for test admin."""
     from app.core.security import create_access_token
 
     return create_access_token(subject=test_admin.id, is_admin=test_admin.is_admin)
+
+
+@pytest_asyncio.fixture
+async def user_headers(user_token):
+    """Generate authorization headers for test user."""
+    return {"Authorization": f"Bearer {user_token}"}
+
+
+@pytest_asyncio.fixture
+async def admin_headers(admin_token):
+    """Generate authorization headers for test admin."""
+    return {"Authorization": f"Bearer {admin_token}"}

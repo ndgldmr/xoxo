@@ -5,6 +5,199 @@ All notable changes to the XOXO Education Backend will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## \[0.6.0\] - 2025-11-26
+
+### Added - AI-Powered Message Generation
+
+#### ✨ AI Integration for Message of the Day
+
+This release adds AI-powered content generation for Message of the Day, enabling admins to automatically generate high-quality English learning content using LLM providers. **Scheduling and WhatsApp integration are planned for future releases** - this implementation focuses on AI generation infrastructure.
+
+#### 🤖 LLM Client Abstraction
+
+**Provider-Agnostic AI Interface** (`app/core/llm_client.py`)
+
+* `LLMClient` abstract base class defining generation interface
+* `MockLLMClient` - Deterministic mock for testing (default provider)
+  * Cycles through predefined subject pool
+  * Respects exclusion lists for retry scenarios
+  * Fully testable without API costs or network dependencies
+* `OpenAIClient` - Production-ready OpenAI/OpenRouter client
+  * Supports OpenAI API (gpt-4o-mini, gpt-3.5-turbo, gpt-4, etc.)
+  * Supports OpenRouter API (any model via OpenRouter)
+  * Configurable model, timeout, max_tokens
+  * Comprehensive error handling with typed exceptions
+* `LLMClientError` - Structured error type with error_type codes:
+  * `AI_TIMEOUT` - API request timeout
+  * `AI_JSON_PARSE_ERROR` - Failed to parse LLM response as JSON
+  * `AI_API_ERROR` - Provider API error
+  * `AI_VALIDATION_ERROR` - Response failed Pydantic validation
+  * `AI_SUBJECT_EXHAUSTED` - No available subjects after exclusions
+
+**Prompt Engineering** (`app/core/prompts.py`)
+
+* `build_message_generation_prompt()` - Structured prompt builder
+  * CEFR A2-B1 level targeting (beginner-intermediate adult learners)
+  * Friendly, encouraging tone aligned with XOXO mission
+  * Category context integration
+  * Recent subjects context (last 10) to avoid duplicates
+  * Explicit subject exclusion on retry
+  * Strict JSON output format instructions
+* Example prompts and expected responses for documentation
+
+#### 🎯 Message Generation Service
+
+**Business Logic Layer** (`app/services/message_generation.py`)
+
+* `MessageGenerationService` - Orchestrates AI generation flow
+  * Constructor: Accepts db session, LLM client, max_retries
+  * `generate_for_date(message_date, category)` - Main generation method
+  * Pre-flight validation: Checks message_date uniqueness
+  * Context gathering: Retrieves last 10 subjects for prompt
+  * Subject conflict handling: Automatic retry with exclusion list
+  * Integration with existing MessageService for persistence
+* **Generation Flow:**
+  1. Validate message_date is available (one per day rule)
+  2. Fetch recent subjects for LLM context
+  3. Call LLM with structured prompt (includes category + recent subjects)
+  4. Parse and validate JSON response with Pydantic
+  5. Check subject uniqueness
+  6. On conflict: Retry once with explicit subject exclusion
+  7. Create message via MessageService (enforces all business rules)
+* Comprehensive logging at debug/info/error levels
+* Clean error propagation (AlreadyExistsException, LLMClientError)
+
+#### 🚀 Admin API Endpoint
+
+**AI Generation Endpoint** (`app/api/v1/endpoints/messages.py`)
+
+* `POST /api/v1/messages/generate` - Admin-triggered AI generation
+  * Request: `{ message_date: "YYYY-MM-DD", category?: "slug" }`
+  * Response: Created Message (same schema as manual creation)
+  * Status codes:
+    * 201 Created - Success
+    * 401 Unauthorized - Not authenticated
+    * 403 Forbidden - Not admin
+    * 409 Conflict - message_date exists OR subject conflict after retries
+    * 422 Unprocessable Entity - Invalid request data
+    * 500 Internal Server Error - AI generation failure (includes error_type)
+  * Error responses include error_type for debugging:
+    * `{ "error": "...", "error_type": "AI_TIMEOUT", "message": "..." }`
+
+#### ⚙️ Configuration
+
+**Settings Extension** (`app/core/config.py`)
+
+* New environment variables:
+  * `AI_PROVIDER` - Provider selection (mock, openai, openrouter) [default: mock]
+  * `AI_MODEL` - Model identifier [default: gpt-4o-mini]
+  * `AI_MAX_RETRIES` - Subject conflict retry limit [default: 1]
+  * `AI_TIMEOUT` - API timeout in seconds [default: 30.0]
+  * `AI_MAX_TOKENS` - Max response tokens [default: 500]
+  * `OPENAI_API_KEY` - OpenAI API key (required if provider=openai)
+  * `OPENROUTER_API_KEY` - OpenRouter API key (required if provider=openrouter)
+* `get_llm_client(settings)` - Factory function for provider instantiation
+  * Validates required API keys based on provider
+  * Returns appropriate client implementation
+  * Raises ValueError for unsupported providers or missing keys
+
+**Request/Response Schemas** (`app/schemas/message_generation.py`)
+
+* `MessageGenerationPayload` - AI output validation model
+  * Validates all Message content fields
+  * Same validation rules as MessageCreate
+* `MessageGenerateRequest` - API request schema
+  * Required: message_date (date)
+  * Optional: category (string, max 100 chars)
+* `AIGenerationError` - Structured error response schema
+
+#### 🧪 Testing
+
+**Comprehensive Test Coverage**
+
+* `tests/unit/test_core/test_llm_client.py` - 12 tests
+  * MockLLMClient behavior (exclusions, cycling, exhaustion)
+  * OpenAIClient configuration validation
+  * Payload validation
+* `tests/unit/test_services/test_message_generation.py` - 10 tests
+  * Success path with mocked dependencies
+  * Date conflict handling
+  * Subject conflict with/without retry
+  * Retry exhaustion
+  * Category handling
+  * LLM error propagation
+  * Recent subjects context
+* `tests/unit/test_api/test_messages_generate.py` - 11 tests
+  * Success (with/without category)
+  * Date conflict (409)
+  * Subject conflict (409)
+  * AI errors (500 with error_type)
+  * Auth/admin enforcement (401/403)
+  * Validation errors (422)
+* **Test Strategy:**
+  * All tests use MockLLMClient - no real API calls
+  * Fast, deterministic, no API costs
+  * No network dependencies in CI/CD
+
+**Test Fixtures** (`tests/conftest.py`)
+
+* Added `user_headers` and `admin_headers` fixtures for API testing
+
+#### 📚 Documentation Updates
+
+**README Updates** (`backend/README.md`)
+
+* Features section: Added AI-Powered Message Generation bullet points
+* New detailed section: "Generate a Message with AI"
+  * Full curl examples with request/response
+  * AI configuration guide (all environment variables)
+  * How AI generation works (7-step flow explanation)
+  * Business rules and error codes
+  * Example with mock provider
+* Environment variables section: Documented all AI_* variables
+
+**Updated Architecture**
+
+* Project structure: Added new modules
+  * `app/core/llm_client.py` - AI abstraction
+  * `app/core/prompts.py` - Prompt templates
+  * `app/services/message_generation.py` - Generation service
+  * `app/schemas/message_generation.py` - AI schemas
+
+#### 🎨 Design Decisions
+
+**Why Provider Abstraction?**
+* Future-proof: Easy to add Anthropic, Gemini, or custom providers
+* Testability: MockLLMClient enables fast, free tests
+* Cost control: Dev/test uses mock, prod uses real provider
+
+**Why Retry on Subject Conflict?**
+* Improves UX: One automatic retry increases success rate
+* Limited scope: Max 1 retry avoids infinite loops and high costs
+* Context-aware: Retry includes explicit subject exclusion in prompt
+
+**Why Recent Subjects in Prompt?**
+* Duplicate avoidance: LLM sees last 10 subjects, less likely to repeat
+* Prompt size control: 10 subjects keeps prompt small and cheap
+* Balance: Enough context to help, not so much to bloat tokens
+
+**Why CEFR A2-B1 Level?**
+* Target audience: Adult beginner-intermediate learners
+* Accessibility: Simple language serves widest learner base
+* Future scaling: More advanced content can be layered in future releases
+
+#### 🔮 Future Enhancements
+
+**Not in this Release (v0.6.0):**
+* ❌ Scheduled/cron-based generation
+* ❌ WhatsApp delivery
+* ❌ Per-student localization or proficiency targeting
+* ❌ Admin UI for generation
+
+**Planned for Future Releases:**
+* Scheduled daily generation
+* WhatsApp delivery + per-student formatting
+
 ## \[0.5.0\] - 2025-11-25
 
 ### Added - Message of the Day

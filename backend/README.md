@@ -109,8 +109,15 @@ This project follows a **layered monolithic architecture** with clear separation
   - Cultural notes: Optional cultural/context information
 - Filtering by category, date, and active status
 - Pagination support with default date-descending sort
-- **Current scope**: Data model and admin CRUD API
-- **Future enhancements**: AI-powered content generation, scheduled delivery, WhatsApp integration
+- **✨ AI-Powered Message Generation**:
+  - Admin-triggered AI content generation via `POST /messages/generate`
+  - Provider-agnostic LLM abstraction (supports Mock, OpenAI, OpenRouter)
+  - Intelligent subject uniqueness handling with automatic retry
+  - Context-aware prompts using recent subjects to avoid duplicates
+  - Friendly CEFR A2-B1 level content for adult learners
+  - Configurable AI provider, model, timeout, and retry settings
+  - Comprehensive error handling with admin-friendly error messages
+- **Future enhancements**: Scheduled delivery, WhatsApp integration, per-student localization
 
 ### 🏥 Health & Monitoring
 - Health check endpoints (`/health`, `/health/db`)
@@ -223,18 +230,23 @@ This is the easiest way to get started. It will set up PostgreSQL and the API au
    cd backend
    ```
 
-2. **Start services:**
+2. **Configure environment variables (optional for AI features):**
+   ```bash
+   cp .env.example .env
+   ```
+
+   **Note:** The `.env` file is **optional** for basic usage. Without it, the app uses a mock AI provider (no API keys needed). To enable real AI-powered message generation, edit `.env` and add your OpenAI or OpenRouter API key (see [AI Configuration](#-ai-configuration) below).
+
+3. **Start services:**
    ```bash
    docker compose up
    ```
-
-   **Note:** No need to create a `.env` file! All environment variables are configured in `docker-compose.yml`.
 
    The API will be available at: http://localhost:8000
 
    API Documentation: http://localhost:8000/docs
 
-3. **Optional: Start with pgAdmin (database UI):**
+4. **Optional: Start with pgAdmin (database UI):**
    ```bash
    docker compose --profile tools up
    ```
@@ -457,6 +469,273 @@ curl -X POST http://localhost:8000/api/v1/users/ \
 - `403`: Not admin (Admin privileges required)
 - `409`: Email already exists
 - `422`: Password doesn't meet requirements
+
+## 🤖 AI Configuration
+
+The XOXO Education backend includes AI-powered message generation capabilities. This allows admins to automatically generate English learning content using Large Language Models (LLMs).
+
+### Overview
+
+The AI message generation feature:
+- ✅ Supports multiple AI providers: **Mock** (free, no API key), **OpenAI**, and **OpenRouter**
+- ✅ Generates CEFR A2-B1 level content for adult learners
+- ✅ Automatically avoids duplicate subjects using recent message history
+- ✅ Includes intelligent retry logic on subject conflicts
+- ✅ Fully configurable via environment variables
+- ✅ Admin-only access via `POST /api/v1/messages/generate`
+
+### Quick Start
+
+By default, the system uses a **mock AI provider** that requires no API keys and generates deterministic test content. This is perfect for:
+- Development and testing
+- Understanding the API without incurring costs
+- Demonstrations and prototypes
+
+To enable real AI-powered generation, you need to configure an API key from OpenAI or OpenRouter.
+
+### Setting Up API Keys
+
+#### 1. Get API Keys
+
+Choose one of the following providers:
+
+**Option A: OpenAI** (Recommended for simplicity)
+- Sign up at: https://platform.openai.com/signup
+- Create API key at: https://platform.openai.com/api-keys
+- Models: `gpt-4o-mini` (default, cheapest), `gpt-3.5-turbo`, `gpt-4`, `gpt-4-turbo`
+- Cost: ~$0.15 per 1M input tokens, ~$0.60 per 1M output tokens (gpt-4o-mini)
+
+**Option B: OpenRouter** (Access to multiple AI providers)
+- Sign up at: https://openrouter.ai/
+- Create API key at: https://openrouter.ai/keys
+- Models: `anthropic/claude-3-haiku`, `google/gemini-pro`, `meta-llama/llama-3-8b`, and many more
+- Cost: Varies by model, often cheaper than direct providers
+
+#### 2. Configure Environment Variables
+
+**For Docker Compose users (recommended):**
+
+1. Navigate to backend directory:
+   ```bash
+   cd backend
+   ```
+
+2. Copy the example environment file:
+   ```bash
+   cp .env.example .env
+   ```
+
+3. Edit `.env` and update the AI Configuration section:
+
+   **For OpenAI:**
+   ```bash
+   AI_PROVIDER=openai
+   AI_MODEL=gpt-4o-mini
+   OPENAI_API_KEY=sk-proj-your-actual-key-here
+
+   # Optional tuning (defaults shown):
+   AI_MAX_RETRIES=1
+   AI_TIMEOUT=30.0
+   AI_MAX_TOKENS=500
+   ```
+
+   **For OpenRouter:**
+   ```bash
+   AI_PROVIDER=openrouter
+   AI_MODEL=anthropic/claude-3-haiku
+   OPENROUTER_API_KEY=sk-or-v1-your-actual-key-here
+
+   # Optional tuning (defaults shown):
+   AI_MAX_RETRIES=1
+   AI_TIMEOUT=30.0
+   AI_MAX_TOKENS=500
+   ```
+
+   **To keep using Mock (no API key needed):**
+   ```bash
+   AI_PROVIDER=mock
+   # No API key needed
+   ```
+
+4. Restart Docker containers to apply changes:
+   ```bash
+   docker compose down
+   docker compose up -d
+   ```
+
+**For local development (without Docker):**
+
+Follow the same steps above, then restart your uvicorn server:
+```bash
+# Stop the server (Ctrl+C), then restart:
+uvicorn app.main:app --reload
+```
+
+### Configuration Reference
+
+All AI settings are configured via environment variables in `.env`:
+
+| Variable | Options | Default | Description |
+|----------|---------|---------|-------------|
+| `AI_PROVIDER` | `mock`, `openai`, `openrouter` | `mock` | Which AI provider to use |
+| `AI_MODEL` | Provider-specific | `gpt-4o-mini` | Model identifier |
+| `OPENAI_API_KEY` | `sk-...` | (empty) | OpenAI API key |
+| `OPENROUTER_API_KEY` | `sk-or-v1-...` | (empty) | OpenRouter API key |
+| `AI_MAX_RETRIES` | Integer | `1` | Retries on subject conflict |
+| `AI_TIMEOUT` | Float (seconds) | `30.0` | API request timeout |
+| `AI_MAX_TOKENS` | Integer | `500` | Max response tokens |
+
+**Model Recommendations:**
+
+For OpenAI:
+- `gpt-4o-mini`: Best balance of cost and quality (recommended)
+- `gpt-3.5-turbo`: Cheaper, slightly lower quality
+- `gpt-4` or `gpt-4-turbo`: Highest quality, more expensive
+
+For OpenRouter:
+- `anthropic/claude-3-haiku`: Fast, high-quality, cost-effective
+- `google/gemini-pro`: Good quality, competitive pricing
+- `meta-llama/llama-3-8b`: Open source option
+
+### Testing AI Message Generation
+
+Once configured, test the AI generation endpoint:
+
+**1. Login as admin and get access token:**
+```bash
+curl -X POST http://localhost:8000/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "admin@xoxoeducation.com",
+    "password": "YourPassword123!"
+  }'
+```
+
+**2. Generate an AI message:**
+```bash
+curl -X POST http://localhost:8000/api/v1/messages/generate \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message_date": "2025-11-26",
+    "category": "everyday_phrases"
+  }'
+```
+
+**Expected response (201 Created):**
+```json
+{
+  "id": 1,
+  "message_date": "2025-11-26",
+  "category": "everyday_phrases",
+  "subject": "Break the ice",
+  "definition": "To make people feel more comfortable in a social situation",
+  "example": "He told a joke to break the ice at the beginning of the meeting.",
+  "usage_tips": "Use this phrase when you want to reduce tension or start a conversation.",
+  "cultural_notes": "Common in English-speaking business contexts.",
+  "is_active": true,
+  "created_at": "2025-11-26T12:00:00Z",
+  "updated_at": "2025-11-26T12:00:00Z"
+}
+```
+
+**Try with different categories:**
+- `everyday_phrases`: Common expressions and greetings
+- `idioms`: English idioms and sayings
+- `business_english`: Professional vocabulary
+- `slang`: Informal expressions
+- Or any custom category
+
+### How It Works
+
+When you call `/messages/generate`, the system:
+
+1. **Validates** that the message_date is not already used
+2. **Retrieves context**: Last 10 subjects from existing messages
+3. **Calls AI provider** with a structured prompt (CEFR A2-B1 level)
+4. **Parses response**: Validates JSON structure and content
+5. **Checks uniqueness**: Ensures subject hasn't been used before
+6. **Retries on conflict**: If subject exists, adds it to exclusion list and retries once
+7. **Saves to database**: Creates message via standard MessageService
+
+### Security & Best Practices
+
+**API Key Security:**
+- ✅ Never commit `.env` to version control (already gitignored)
+- ✅ Use environment variables in production (not `.env` files)
+- ✅ Rotate API keys periodically
+- ✅ Monitor API usage and set billing limits with your provider
+
+**Cost Management:**
+- Use `AI_MAX_TOKENS=500` to limit response size (default)
+- Start with `gpt-4o-mini` or `claude-3-haiku` (most cost-effective)
+- Use mock provider for development and testing
+- Monitor API usage in your provider's dashboard
+
+**Error Handling:**
+
+The system provides clear error messages for common issues:
+- `409`: Message date already exists OR subject conflict after retries
+- `500`: AI errors with `error_type` field:
+  - `AI_TIMEOUT`: API request timed out
+  - `AI_JSON_PARSE_ERROR`: Failed to parse LLM response
+  - `AI_API_ERROR`: Provider API returned error
+  - `AI_VALIDATION_ERROR`: Response failed validation
+  - `AI_SUBJECT_CONFLICT`: Subject already exists after retries
+
+Check server logs for detailed error information.
+
+### Troubleshooting
+
+#### "AI provider configuration error"
+**Cause:** Invalid `AI_PROVIDER` value or missing API key
+**Solution:**
+- Ensure `AI_PROVIDER` is one of: `mock`, `openai`, or `openrouter`
+- If using OpenAI, verify `OPENAI_API_KEY` is set
+- If using OpenRouter, verify `OPENROUTER_API_KEY` is set
+- Restart Docker: `docker compose down && docker compose up -d`
+
+#### "API request timed out" (AI_TIMEOUT error)
+**Cause:** AI provider took too long to respond
+**Solution:**
+- Increase `AI_TIMEOUT` in `.env` (e.g., `AI_TIMEOUT=60.0`)
+- Check your internet connection
+- Verify API provider status page
+
+#### "Failed to parse LLM response" (AI_JSON_PARSE_ERROR)
+**Cause:** AI returned invalid JSON or non-JSON content
+**Solution:**
+- This is usually a provider issue; retry the request
+- Check server logs for the raw response
+- Consider using a different model
+
+#### Mock Provider Always Returns Same Content
+**Cause:** Mock provider uses deterministic cycling for testing
+**Solution:** This is expected behavior. For unique content, configure OpenAI or OpenRouter.
+
+#### "Subject already exists" after retries
+**Cause:** AI generated a duplicate subject twice (rare)
+**Solution:**
+- Retry the request (AI should generate different content)
+- Consider increasing `AI_MAX_RETRIES` in `.env`
+- Manually create a message for that date instead
+
+### Advanced Configuration
+
+**Custom Prompts:**
+
+The system uses predefined prompts in `app/core/prompts.py`. To customize prompts:
+1. Edit `app/core/prompts.py`
+2. Modify the `build_message_generation_prompt()` function
+3. Restart the application
+
+**Provider-Specific Settings:**
+
+Both OpenAI and OpenRouter clients use the same interface. OpenRouter is configured with a custom base URL:
+- OpenAI: `https://api.openai.com/v1`
+- OpenRouter: `https://openrouter.ai/api/v1`
+
+The system automatically handles provider differences.
 
 ## Database Migrations
 
@@ -902,6 +1181,99 @@ curl -X POST http://localhost:8000/api/v1/messages \
 - `403`: Not admin
 - `409`: Subject or message_date already exists
 - `422`: Validation error (empty required fields, invalid date)
+
+#### Generate a Message with AI
+
+**Note:** This endpoint uses AI to automatically generate message content. Configure the AI provider via environment variables.
+
+```bash
+curl -X POST http://localhost:8000/api/v1/messages/generate \
+  -H "Authorization: Bearer YOUR_ADMIN_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message_date": "2025-11-26",
+    "category": "everyday_phrases"
+  }'
+```
+
+**Response (201):**
+```json
+{
+  "id": 2,
+  "message_date": "2025-11-26",
+  "category": "everyday_phrases",
+  "subject": "Break the ice",
+  "definition": "To make people feel more comfortable in a social situation",
+  "example": "He told a joke to break the ice at the beginning of the meeting.",
+  "usage_tips": "Use this phrase when you want to reduce tension or start a conversation in an awkward situation.",
+  "cultural_notes": "Common in English-speaking business and social contexts.",
+  "is_active": true,
+  "created_at": "2025-11-26T12:00:00Z",
+  "updated_at": "2025-11-26T12:00:00Z"
+}
+```
+
+**AI Configuration (Environment Variables):**
+```bash
+# Required: Choose AI provider
+AI_PROVIDER=mock              # Options: mock (default), openai, openrouter
+
+# For OpenAI:
+AI_PROVIDER=openai
+OPENAI_API_KEY=sk-...
+AI_MODEL=gpt-4o-mini          # Default, can use gpt-3.5-turbo, gpt-4, etc.
+
+# For OpenRouter:
+AI_PROVIDER=openrouter
+OPENROUTER_API_KEY=sk-or-...
+AI_MODEL=anthropic/claude-3-haiku  # Or any OpenRouter model
+
+# Optional tuning:
+AI_MAX_RETRIES=1              # Retries on subject conflict (default: 1)
+AI_TIMEOUT=30.0               # API timeout in seconds (default: 30)
+AI_MAX_TOKENS=500             # Max response tokens (default: 500)
+```
+
+**How AI Generation Works:**
+1. Checks if `message_date` already has a message (fails if exists)
+2. Retrieves last 10 subjects as context to avoid duplicates
+3. Calls configured LLM provider with structured prompt (CEFR A2-B1 level)
+4. Parses and validates JSON response
+5. Checks if generated `subject` is unique
+6. On subject conflict: retries once with exclusion list
+7. Creates message in database via standard MessageService
+
+**Business Rules:**
+- Same uniqueness constraints as manual creation
+- Automatic retry on subject conflict (configurable)
+- Uses recent subjects as context to help AI avoid duplicates
+- All content in canonical English (A2-B1 level for adult learners)
+- Category is optional; influences AI's subject selection
+
+**Errors:**
+- `401`: Not authenticated
+- `403`: Not admin
+- `409`: Message date already exists OR subject conflict after retries
+- `422`: Invalid date or category format
+- `500`: AI generation errors (timeout, API error, parse error, etc.)
+  - Error response includes `error_type` field for debugging:
+    - `AI_TIMEOUT`: API request timed out
+    - `AI_JSON_PARSE_ERROR`: Failed to parse LLM response as JSON
+    - `AI_API_ERROR`: Provider API returned error
+    - `AI_VALIDATION_ERROR`: Response failed Pydantic validation
+    - `AI_SUBJECT_CONFLICT`: Subject already exists after retries
+
+**Example with Mock Provider (Default):**
+```bash
+# No API key needed - uses deterministic mock responses
+curl -X POST http://localhost:8000/api/v1/messages/generate \
+  -H "Authorization: Bearer YOUR_ADMIN_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message_date": "2025-11-27",
+    "category": "idioms"
+  }'
+```
 
 #### Get All Messages (with Filters)
 

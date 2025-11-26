@@ -68,6 +68,33 @@ class Settings(BaseSettings):
         description="Refresh token expiration time in minutes (7 days default)",
     )
 
+    # AI Configuration
+    AI_PROVIDER: Literal["mock", "openai", "openrouter"] = Field(
+        default="mock",
+        description="AI provider for message generation (mock, openai, openrouter)",
+    )
+    AI_MODEL: str = Field(
+        default="gpt-4o-mini",
+        description="Model name for AI provider (e.g., gpt-4o-mini, gpt-3.5-turbo)",
+    )
+    AI_MAX_RETRIES: int = Field(
+        default=1,
+        description="Max retries for subject uniqueness conflicts during generation",
+    )
+    AI_TIMEOUT: float = Field(
+        default=30.0, description="AI API request timeout in seconds"
+    )
+    AI_MAX_TOKENS: int = Field(
+        default=500, description="Maximum tokens in AI response"
+    )
+    OPENAI_API_KEY: str | None = Field(
+        default=None, description="OpenAI API key (required if AI_PROVIDER=openai)"
+    )
+    OPENROUTER_API_KEY: str | None = Field(
+        default=None,
+        description="OpenRouter API key (required if AI_PROVIDER=openrouter)",
+    )
+
     @field_validator("SECRET_KEY")
     @classmethod
     def validate_secret_key(cls, v: str, info) -> str:
@@ -119,3 +146,58 @@ def get_settings() -> Settings:
 
 # Convenience export
 settings = get_settings()
+
+
+def get_llm_client(settings: Settings):
+    """
+    Factory function to get the appropriate LLM client based on settings.
+
+    Args:
+        settings: Application settings instance
+
+    Returns:
+        LLMClient implementation (MockLLMClient, OpenAIClient, etc.)
+
+    Raises:
+        ValueError: If provider is not supported or required API key is missing
+    """
+    from app.core.llm_client import MockLLMClient, OpenAIClient
+
+    provider = settings.AI_PROVIDER.lower()
+
+    if provider == "mock":
+        return MockLLMClient()
+
+    elif provider == "openai":
+        if not settings.OPENAI_API_KEY:
+            raise ValueError(
+                "OPENAI_API_KEY is required when AI_PROVIDER=openai. "
+                "Set the environment variable or add it to .env"
+            )
+        return OpenAIClient(
+            api_key=settings.OPENAI_API_KEY,
+            model=settings.AI_MODEL,
+            base_url="https://api.openai.com/v1",
+            timeout=settings.AI_TIMEOUT,
+            max_tokens=settings.AI_MAX_TOKENS,
+        )
+
+    elif provider == "openrouter":
+        if not settings.OPENROUTER_API_KEY:
+            raise ValueError(
+                "OPENROUTER_API_KEY is required when AI_PROVIDER=openrouter. "
+                "Set the environment variable or add it to .env"
+            )
+        return OpenAIClient(
+            api_key=settings.OPENROUTER_API_KEY,
+            model=settings.AI_MODEL,
+            base_url="https://openrouter.ai/api/v1",
+            timeout=settings.AI_TIMEOUT,
+            max_tokens=settings.AI_MAX_TOKENS,
+        )
+
+    else:
+        raise ValueError(
+            f"Unsupported AI provider: {provider}. "
+            f"Supported providers: mock, openai, openrouter"
+        )
