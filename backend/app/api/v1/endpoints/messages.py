@@ -4,18 +4,24 @@ Message API endpoints.
 All message management endpoints require admin privileges.
 """
 
+import logging
 from datetime import date
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_llm_client, get_settings
 from app.core.deps import get_db, require_admin
+from app.core.llm_client import LLMClientError
 from app.models.user import User as UserModel
 from app.schemas.message import Message, MessageCreate, MessageUpdate
+from app.schemas.message_generation import MessageGenerateRequest
 from app.services.message import MessageService
+from app.services.message_generation import MessageGenerationService
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.post("/", response_model=Message, status_code=status.HTTP_201_CREATED)
@@ -225,3 +231,85 @@ async def activate_message(
     """
     service = MessageService(db)
     return await service.activate_message(message_id)
+
+
+@router.post("/generate", response_model=Message, status_code=status.HTTP_201_CREATED)
+async def generate_message(
+    request_data: MessageGenerateRequest,
+    db: AsyncSession = Depends(get_db),
+    admin_user: UserModel = Depends(require_admin),
+):
+    """
+    Generate a new message using AI (admin only).
+
+    Triggers AI to generate canonical English content for the specified date.
+    Uses the configured LLM provider (mock, OpenAI, OpenRouter) to create a
+    Message of the Day with subject, definition, example, usage tips, and
+    optional cultural notes.
+
+    **Business Rules:**
+    - `message_date` must not already have a message (one message per day)
+    - AI-generated `subject` must be globally unique
+    - System automatically retries once on subject conflict
+    - Uses last 10 subjects as context to help AI avoid duplicates
+
+    **AI Configuration:**
+    - Configure via environment variables:
+      - `AI_PROVIDER`: "mock" (default), "openai", or "openrouter"
+      - `OPENAI_API_KEY`: Required if using OpenAI
+      - `OPENROUTER_API_KEY`: Required if using OpenRouter
+      - `AI_MODEL`: Model name (default: "gpt-4o-mini")
+
+    Args:
+        request_data: Generation request with message_date and optional category
+        db: Database session
+        admin_user: Current authenticated admin user
+
+    Returns:
+        Created message with AI-generated content
+
+    Raises:
+        401: If not authenticated
+        403: If not admin
+        409: If message_date already exists or subject conflict after retries
+        422: If validation fails (invalid date, category)
+        500: If AI generation fails (timeout, API error, parse error)
+    """
+    try:
+        # Get LLM client from settings
+        settings = get_settings()
+        llm_client = get_llm_client(settings)
+
+        # Initialize generation service
+        generation_service = MessageGenerationService(
+            db=db,
+            llm_client=llm_client,
+            max_retries=settings.AI_MAX_RETRIES,
+        )
+
+        # Generate and create message
+        message = await generation_service.generate_for_date(
+            message_date=request_data.message_date,
+            category=request_data.category,
+        )
+
+        return message
+
+    except LLMClientError as e:
+        # AI-specific errors (timeout, parse errors, API errors)
+        from fastapi import HTTPException
+
+        logger.error(
+            f"AI generation failed: {e.error_type} - {e.message}",
+            extra={"details": e.details},
+        )
+
+        # Return error type to admin for debugging
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "error": "AI generation failed",
+                "error_type": e.error_type,
+                "message": e.message,
+            },
+        )

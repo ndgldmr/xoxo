@@ -57,8 +57,13 @@ docker compose up
 - Category-based organization (auto-normalized to slug format)
 - Soft delete with activation/deactivation
 - Advanced filtering by category, date, active status
-- **Current**: Data model and CRUD API
-- **Future**: AI-powered generation, scheduling, WhatsApp delivery
+- **✨ AI-Powered Message Generation**:
+  - Admin-triggered AI content generation
+  - Multi-provider support (Mock, OpenAI, OpenRouter)
+  - Intelligent subject uniqueness with automatic retry
+  - Context-aware prompts using recent subjects
+  - CEFR A2-B1 level content for adult learners
+- **Future**: Scheduled delivery, WhatsApp integration
 
 ### 🏥 Health Monitoring
 - Health check endpoints
