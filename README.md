@@ -48,18 +48,6 @@ docker compose up
   - Daily message opt-in with timezone preferences
   - Preparation for AI-generated WhatsApp messaging
 
-### 📝 Message of the Day
-- Daily English learning message management (admin-only)
-- One unique message per day (date constraint)
-- Globally unique subjects (English words/phrases)
-- Canonical English content with structured fields:
-  - Definition, examples, usage tips, cultural notes
-- Category-based organization (auto-normalized to slug format)
-- Soft delete with activation/deactivation
-- Advanced filtering by category, date, active status
-- **Current**: Data model and CRUD API
-- **Future**: AI-powered generation, scheduling, WhatsApp delivery
-
 ### 🏥 Health Monitoring
 - Health check endpoints
 - Database connectivity monitoring
