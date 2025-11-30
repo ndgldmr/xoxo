@@ -175,10 +175,7 @@ class TestMessageService:
         mock_repository.get.return_value = sample_message
         mock_repository.subject_exists.return_value = False
         mock_repository.date_exists.return_value = False
-        # Create a separate mock for the updated message
-        updated_message = MagicMock(spec=Message)
-        updated_message.id = sample_message.id
-        updated_message.subject = "Hi"
+        updated_message = Message(**{**sample_message.__dict__, "subject": "Hi"})
         mock_repository.update.return_value = updated_message
 
         update_data = MessageUpdate(subject="Hi")
@@ -251,10 +248,7 @@ class TestMessageService:
     async def test_delete_message_success(self, service, mock_repository, sample_message):
         """Test successful soft delete of message."""
         mock_repository.get.return_value = sample_message
-        # Create deactivated message for return
-        deactivated_message = MagicMock(spec=Message)
-        deactivated_message.id = sample_message.id
-        deactivated_message.is_active = False
+        deactivated_message = Message(**{**sample_message.__dict__, "is_active": False})
         mock_repository.update.return_value = deactivated_message
 
         result = await service.delete_message(1)
@@ -279,16 +273,9 @@ class TestMessageService:
         self, service, mock_repository, sample_message
     ):
         """Test successful activation of message."""
-        # Create deactivated message mock
-        deactivated = MagicMock(spec=Message)
-        deactivated.id = sample_message.id
-        deactivated.is_active = False
+        deactivated = Message(**{**sample_message.__dict__, "is_active": False})
         mock_repository.get.return_value = deactivated
-        # Create activated message for return
-        activated = MagicMock(spec=Message)
-        activated.id = sample_message.id
-        activated.is_active = True
-        mock_repository.update.return_value = activated
+        mock_repository.update.return_value = sample_message
 
         result = await service.activate_message(1)
 
