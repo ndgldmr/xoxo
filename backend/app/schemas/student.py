@@ -3,9 +3,9 @@ Pydantic schemas for Student model.
 These schemas handle request validation and response serialization.
 """
 
-from datetime import datetime, time
+from datetime import datetime
 from typing import Optional
-from zoneinfo import ZoneInfo, available_timezones
+from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
@@ -26,17 +26,14 @@ class StudentBase(BaseModel):
     country: Optional[str] = Field(None, max_length=100, description="Country")
     is_active: bool = Field(default=True, description="Whether student is active")
 
-    proficiency_level: str = Field(
+    english_level: str = Field(
         ..., description="English proficiency level: beginner, intermediate, or advanced"
     )
     native_language: str = Field(
         default="pt-BR", max_length=10, description="Student's native language (e.g., pt-BR)"
     )
-    wants_daily_message: bool = Field(
-        default=False, description="Whether student wants daily AI-generated messages"
-    )
-    daily_message_time_local: Optional[time] = Field(
-        None, description="Preferred time for daily message in student's local timezone"
+    whatsapp_messages: bool = Field(
+        default=False, description="Whether student wants daily AI-generated WhatsApp messages"
     )
     timezone: Optional[str] = Field(
         None, max_length=50, description="IANA timezone (e.g., America/Sao_Paulo)"
@@ -68,14 +65,14 @@ class StudentCreate(StudentBase):
 
         return v
 
-    @field_validator("proficiency_level")
+    @field_validator("english_level")
     @classmethod
-    def validate_proficiency_level(cls, v: str) -> str:
-        """Validate proficiency level is one of the allowed values."""
+    def validate_english_level(cls, v: str) -> str:
+        """Validate English level is one of the allowed values."""
         allowed_levels = {"beginner", "intermediate", "advanced"}
         if v.lower() not in allowed_levels:
             raise ValueError(
-                f"Proficiency level must be one of: {', '.join(allowed_levels)}"
+                f"English level must be one of: {', '.join(allowed_levels)}"
             )
         return v.lower()
 
@@ -97,30 +94,15 @@ class StudentCreate(StudentBase):
 
         return v
 
-    @field_validator("wants_daily_message")
-    @classmethod
-    def validate_messaging_requirements(cls, v: bool, info) -> bool:
-        """
-        If wants_daily_message is True, ensure timezone and daily_message_time_local are provided.
-        This validator runs after individual field validation.
-        """
-        # Note: Pydantic v2 model_validator is needed for cross-field validation
-        # This basic validator just validates the boolean itself
-        return v
-
     def model_post_init(self, __context) -> None:
         """
         Post-initialization validation for cross-field dependencies.
-        If wants_daily_message is True, timezone and daily_message_time_local must be set.
+        If whatsapp_messages is True, timezone must be set.
         """
-        if self.wants_daily_message:
+        if self.whatsapp_messages:
             if self.timezone is None:
                 raise ValueError(
-                    "timezone is required when wants_daily_message is True"
-                )
-            if self.daily_message_time_local is None:
-                raise ValueError(
-                    "daily_message_time_local is required when wants_daily_message is True"
+                    "timezone is required when whatsapp_messages is True"
                 )
         return super().model_post_init(__context) if hasattr(super(), 'model_post_init') else None
 
@@ -142,18 +124,15 @@ class StudentUpdate(BaseModel):
     country: Optional[str] = Field(None, max_length=100, description="Country")
     is_active: Optional[bool] = Field(None, description="Whether student is active")
 
-    # Messaging preferences (Phase 0)
-    proficiency_level: Optional[str] = Field(
+    # Messaging preferences
+    english_level: Optional[str] = Field(
         None, description="English proficiency level: beginner, intermediate, or advanced"
     )
     native_language: Optional[str] = Field(
         None, max_length=10, description="Student's native language (e.g., pt-BR)"
     )
-    wants_daily_message: Optional[bool] = Field(
-        None, description="Whether student wants daily AI-generated messages"
-    )
-    daily_message_time_local: Optional[time] = Field(
-        None, description="Preferred time for daily message in student's local timezone"
+    whatsapp_messages: Optional[bool] = Field(
+        None, description="Whether student wants daily AI-generated WhatsApp messages"
     )
     timezone: Optional[str] = Field(
         None, max_length=50, description="IANA timezone (e.g., America/Sao_Paulo)"
@@ -178,17 +157,17 @@ class StudentUpdate(BaseModel):
 
         return v
 
-    @field_validator("proficiency_level")
+    @field_validator("english_level")
     @classmethod
-    def validate_proficiency_level(cls, v: Optional[str]) -> Optional[str]:
-        """Validate proficiency level is one of the allowed values if provided."""
+    def validate_english_level(cls, v: Optional[str]) -> Optional[str]:
+        """Validate English level is one of the allowed values if provided."""
         if v is None:
             return v
 
         allowed_levels = {"beginner", "intermediate", "advanced"}
         if v.lower() not in allowed_levels:
             raise ValueError(
-                f"Proficiency level must be one of: {', '.join(allowed_levels)}"
+                f"English level must be one of: {', '.join(allowed_levels)}"
             )
         return v.lower()
 

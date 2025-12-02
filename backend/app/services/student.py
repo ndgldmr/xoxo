@@ -178,7 +178,7 @@ class StudentService:
         Raises:
             NotFoundException: If student not found
             AlreadyExistsException: If email or phone change conflicts with existing student
-            ValueError: If wants_daily_message=True but timezone or daily_message_time_local missing
+            ValueError: If whatsapp_messages=True but timezone missing
         """
         # Get existing student
         student = await self.get_student(student_id)
@@ -207,28 +207,18 @@ class StudentService:
                     )
                 student_data.phone_number = normalized_phone
 
-        # Business logic: If updating wants_daily_message to True, validate required fields
-        if student_data.wants_daily_message is True:
+        # Business logic: If updating whatsapp_messages to True, validate required fields
+        if student_data.whatsapp_messages is True:
             # Determine final timezone value (update value or existing value)
             final_timezone = (
                 student_data.timezone
                 if student_data.timezone is not None
                 else student.timezone
             )
-            # Determine final daily_message_time_local value
-            final_time = (
-                student_data.daily_message_time_local
-                if student_data.daily_message_time_local is not None
-                else student.daily_message_time_local
-            )
 
             if final_timezone is None:
                 raise ValueError(
-                    "timezone is required when wants_daily_message is True"
-                )
-            if final_time is None:
-                raise ValueError(
-                    "daily_message_time_local is required when wants_daily_message is True"
+                    "timezone is required when whatsapp_messages is True"
                 )
 
         return await self.repository.update(db_obj=student, obj_in=student_data)

@@ -51,6 +51,7 @@ services:
       # Mount source code for development (comment out for production)
       - ./app:/app/app
       - ./alembic:/app/alembic
+      - ./tests:/app/tests
     command: >
       sh -c "
         echo 'Waiting for database...' &&

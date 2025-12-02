@@ -5,6 +5,105 @@ All notable changes to the XOXO Education Backend will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## \[0.5.0\] - 2025-12-01
+
+### Changed - Student Model Field Improvements
+
+#### 📊 Improved Naming and Simplified Messaging Fields
+
+This release improves the student model by renaming fields for better clarity and removing unnecessary fields.
+
+#### 🔄 Field Changes
+
+**Renamed Fields**
+
+* `proficiency_level` → `english_level`
+  * More descriptive and explicit about what is being measured
+  * Validation rules remain the same: `beginner`, `intermediate`, `advanced`
+  * Data preserved during migration (column rename, not drop/add)
+
+* `wants_daily_message` → `whatsapp_messages`
+  * Clearer indication that this is for WhatsApp messaging specifically
+  * Boolean field indicating opt-in for daily WhatsApp messages
+  * Data preserved during migration (column rename, not drop/add)
+
+**Removed Fields**
+
+* `daily_message_time_local` (TIME field)
+  * **Rationale**: Message timing will be handled by a separate scheduling service in the future
+  * This field was premature optimization and added unnecessary complexity
+  * Timezone field remains for proper message delivery timing
+
+**Updated Validation**
+
+* When `whatsapp_messages=true`, only `timezone` is required (previously required both `timezone` and `daily_message_time_local`)
+* All other validation rules remain unchanged
+
+#### 🏗️ Migration Details
+
+**Database Migration** (`2025_12_01_1846-6904e90a9791`)
+
+* Renames `proficiency_level` column to `english_level` (preserves data)
+* Renames `wants_daily_message` column to `whatsapp_messages` (preserves data)
+* Drops `daily_message_time_local` column
+* Updates column comments for clarity
+* Clean upgrade and downgrade paths
+
+**Schema Updates**
+
+* `app/schemas/student.py`:
+  * Updated all field names in `StudentBase`, `StudentCreate`, and `StudentUpdate`
+  * Updated validators from `validate_proficiency_level` to `validate_english_level`
+  * Simplified cross-field validation in `model_post_init` (removed time requirement)
+  * Updated all field descriptions and error messages
+
+**Model Updates**
+
+* `app/models/student.py`:
+  * Renamed fields to match new schema
+  * Removed `time` import (no longer needed)
+  * Updated field comments
+
+#### 📚 Documentation Updates
+
+**README.md**
+
+* Updated Student Tracking features section
+* Updated all API examples with new field names
+* Updated required fields documentation
+* Updated error messages documentation
+* Simplified messaging preferences explanation
+
+**CHANGELOG.md**
+
+* Added this entry documenting the changes
+
+#### ⚡ Breaking Changes
+
+**API Changes**
+
+* **Request Bodies**: Update all student creation/update requests to use new field names
+  * `proficiency_level` → `english_level`
+  * `wants_daily_message` → `whatsapp_messages`
+  * Remove `daily_message_time_local` from requests
+
+* **Response Bodies**: API responses now use new field names
+  * All existing student records automatically reflect new naming
+
+**Migration Required**
+
+* Database migration must be run: `alembic upgrade head`
+* Existing data is preserved (fields are renamed, not recreated)
+
+#### 🔧 Technical Notes
+
+* Migration uses `ALTER TABLE ... RENAME COLUMN` for data preservation
+* No service downtime required if using rolling deployment
+* Backward compatibility: Not maintained (breaking change)
+* All tests updated to use new field names
+
+---
+
 ## \[0.4.0\] - 2025-11-21
 
 ### Added - Student Messaging Preferences

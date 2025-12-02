@@ -90,7 +90,7 @@ This project follows a **layered monolithic architecture** with clear separation
 - **Messaging preferences**:
   - English proficiency level tracking (beginner, intermediate, advanced)
   - Native language configuration (default: pt-BR)
-  - Daily message opt-in with timezone and time preferences
+  - WhatsApp messaging opt-in with timezone preferences
   - Strict IANA timezone validation
   - Preparation for future AI-generated WhatsApp messaging
 
@@ -691,7 +691,7 @@ curl -X POST http://localhost:8000/api/v1/students \
     "first_name": "Jane",
     "last_name": "Smith",
     "phone_number": "+17038590314",
-    "proficiency_level": "beginner",
+    "english_level": "beginner",
     "country": "USA",
     "is_active": true
   }'
@@ -707,10 +707,9 @@ curl -X POST http://localhost:8000/api/v1/students \
     "first_name": "Jane",
     "last_name": "Smith",
     "phone_number": "+17038590314",
-    "proficiency_level": "intermediate",
+    "english_level": "intermediate",
     "native_language": "pt-BR",
-    "wants_daily_message": true,
-    "daily_message_time_local": "09:00:00",
+    "whatsapp_messages": true,
     "timezone": "America/Sao_Paulo",
     "country": "Brazil",
     "is_active": true
@@ -727,10 +726,9 @@ curl -X POST http://localhost:8000/api/v1/students \
   "phone_number": "+17038590314",
   "country": "Brazil",
   "is_active": true,
-  "proficiency_level": "intermediate",
+  "english_level": "intermediate",
   "native_language": "pt-BR",
-  "wants_daily_message": true,
-  "daily_message_time_local": "09:00:00",
+  "whatsapp_messages": true,
   "timezone": "America/Sao_Paulo",
   "created_at": "2025-11-21T17:00:00Z",
   "updated_at": "2025-11-21T17:00:00Z"
@@ -738,14 +736,13 @@ curl -X POST http://localhost:8000/api/v1/students \
 ```
 
 **Required Fields:**
-- `proficiency_level`: Must be one of: `beginner`, `intermediate`, `advanced` (case-insensitive)
-- If `wants_daily_message` is `true`, both `timezone` and `daily_message_time_local` are required
+- `english_level`: Must be one of: `beginner`, `intermediate`, `advanced` (case-insensitive)
+- If `whatsapp_messages` is `true`, `timezone` is required
 
 **Optional Fields:**
 - `native_language`: Defaults to `"pt-BR"` if not provided
-- `wants_daily_message`: Defaults to `false` if not provided
+- `whatsapp_messages`: Defaults to `false` if not provided
 - `timezone`: IANA timezone (e.g., `America/Sao_Paulo`, `America/New_York`, `Europe/London`)
-- `daily_message_time_local`: Time in HH:MM:SS format (e.g., `"09:00:00"`)
 
 **Errors:**
 - `401`: Not authenticated
@@ -753,9 +750,9 @@ curl -X POST http://localhost:8000/api/v1/students \
 - `409`: Email or phone number already exists
 - `422`: Validation error:
   - Invalid email or phone format
-  - Invalid proficiency_level
+  - Invalid english_level
   - Invalid timezone (must be valid IANA timezone)
-  - Missing timezone or time when wants_daily_message=true
+  - Missing timezone when whatsapp_messages=true
 
 **Phone Number Format:** Must be E.164 format: `+[country code][number]` (e.g., `+17038590314`)
 
