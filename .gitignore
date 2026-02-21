@@ -4,18 +4,31 @@ __pycache__/
 *$py.class
 *.so
 .Python
-env/
-venv/
-.venv/
-ENV/
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
 
-# Environment
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Environment variables
 .env
 .env.local
-.env.*.local
 
 # IDE
 .vscode/
@@ -23,12 +36,26 @@ ENV/
 *.swp
 *.swo
 *~
-.DS_Store
 
-# Logs
-*.log
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Audit logs
+audit_log.jsonl
+*.jsonl
 
 # Database
 *.db
 *.sqlite
 *.sqlite3
+xoxo.db
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
