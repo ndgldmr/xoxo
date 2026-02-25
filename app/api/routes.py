@@ -1,8 +1,11 @@
 """FastAPI routes for Word of the Day service."""
+import re
+import logging
+from typing import Optional, List
+
 from fastapi import FastAPI, HTTPException, Security
 from fastapi.security import APIKeyHeader
-from pydantic import BaseModel, Field
-from typing import Optional, List
+from pydantic import BaseModel, Field, field_validator
 
 from app.config import get_settings
 from app.integrations.llm_client import LLMClient
@@ -11,6 +14,29 @@ from app.logging.audit_log import AuditLog
 from app.services.word_of_day_service import WordOfDayService
 from app.api.webhook_routes import router as webhook_router
 from app.repositories.student import StudentRepository
+
+logger = logging.getLogger(__name__)
+
+
+def normalize_phone(raw: str) -> str:
+    """Normalize a phone number to E.164 format.
+
+    Strips whitespace and common formatting characters (spaces, dashes,
+    parentheses, dots), adds a leading '+' if missing, then validates that
+    the result matches E.164: '+' followed by 7–15 digits.
+
+    Raises:
+        ValueError: If the result is not a valid E.164 number.
+    """
+    cleaned = re.sub(r"[\s\-().]", "", raw.strip())
+    if not cleaned.startswith("+"):
+        cleaned = "+" + cleaned
+    if not re.fullmatch(r"\+\d{7,15}", cleaned):
+        raise ValueError(
+            f"Invalid phone number '{raw}'. "
+            "Please use E.164 format, e.g. +5511999999999."
+        )
+    return cleaned
 
 
 _api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
@@ -64,6 +90,11 @@ class StudentCreate(BaseModel):
     last_name: Optional[str] = None
     english_level: str = Field(default="beginner", description="beginner or intermediate")
     whatsapp_messages: bool = Field(default=True)
+
+    @field_validator("phone_number")
+    @classmethod
+    def validate_phone_number(cls, v: str) -> str:
+        return normalize_phone(v)
 
 
 class StudentResponse(BaseModel):
@@ -227,6 +258,21 @@ async def add_student(student: StudentCreate):
             whatsapp_messages=student.whatsapp_messages,
         )
         session.commit()
+
+        if new_student.whatsapp_messages:
+            try:
+                settings = get_settings()
+                whatsapp = WaSenderClient(
+                    api_key=settings.wasender_api_key,
+                    dry_run=settings.dry_run,
+                )
+                whatsapp.send_welcome_message(
+                    to_number=new_student.phone_number,
+                    first_name=new_student.first_name,
+                )
+            except Exception as e:
+                logger.warning("Welcome message failed for %s: %s", new_student.phone_number, e)
+
         return StudentResponse(
             phone_number=new_student.phone_number,
             first_name=new_student.first_name,
