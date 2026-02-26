@@ -1,4 +1,6 @@
 """WhatsApp client for sending messages via WaSenderAPI."""
+from typing import Optional
+
 import httpx
 
 
@@ -25,7 +27,7 @@ def format_template_params_as_text(params: dict) -> str:
         f"💡 *Quando usar:* {params['when_to_use']}\n\n"
         f"🇧🇷  *Exemplo:* {params['example_pt']}\n\n"
         f"🇺🇸  *Exemplo:* {params['example_en']}\n\n"
-        f"Envie \"STOP\" para cancelar o recebimento de mensagens da Palavra/Frase do Dia."
+        f"Envie *STOP* para cancelar o recebimento de mensagens da Palavra/Frase do Dia."
     )
 
 
@@ -125,6 +127,24 @@ class WaSenderClient:
             )
         except Exception as e:
             raise WhatsAppError(f"Failed to send WaSender message: {e}")
+
+    def send_welcome_message(self, to_number: str, first_name: Optional[str] = None) -> dict:
+        """Send a Portuguese welcome message to a newly enrolled student.
+
+        Args:
+            to_number: Destination number in E.164 format
+            first_name: Student's first name, used to personalise the greeting
+
+        Returns:
+            dict with send result
+        """
+        name_part = f" {first_name}" if first_name else ""
+        message = (
+            f"Olá{name_part}! 👋 Você foi cadastrado(a) no serviço *Palavra do Dia* da XOXO Education.\n\n"
+            f"A partir de agora, você receberá uma mensagem diária com uma palavra ou frase em inglês "
+            f"para turbinar seu vocabulário! Para cancelar, basta responder *STOP*."
+        )
+        return self.send_message(to_number=to_number, message=message)
 
     def send_template_message(
         self, to_number: str, content_sid: str, content_variables: dict

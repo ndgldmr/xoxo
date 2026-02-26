@@ -35,6 +35,7 @@ WhatsApp "English Word/Phrase of the Day" service for Brazilian Portuguese speak
 - **Strict Validation** — All 6 message fields are validated for format, length, language, and content rules before sending
 - **Auto-Retry with Repair** — If validation fails, automatically retries with a repair prompt (up to 2 retries)
 - **Fallback Safety** — Never crashes — a safe fallback message is always delivered if generation fails
+- **Welcome Message** — When a student is added with `whatsapp_messages: true`, a Portuguese welcome WhatsApp message is sent to them automatically
 - **Opt-Out / Opt-In** — Students send "STOP" or "START" via WhatsApp; the webhook updates the database and sends a PT-BR confirmation automatically
 - **API Authentication** — All sensitive endpoints require an `X-API-Key` header
 - **Webhook Signature Verification** — WaSenderAPI webhook requests are verified using a shared secret via `X-Webhook-Signature`
@@ -456,13 +457,21 @@ Adds a new student. **Requires `X-API-Key`.**
 
 | Field | Required | Description |
 |---|---|---|
-| `phone_number` | Yes | E.164 format (e.g. `+5511999999999`) |
+| `phone_number` | Yes | E.164 format (e.g. `+5511999999999`). Light normalization is applied automatically — formatting characters such as spaces, dashes, parentheses, and dots are stripped, and a leading `+` is added if missing. The result must be `+` followed by 7–15 digits. |
 | `first_name` | No | Student's first name |
 | `last_name` | No | Student's last name |
 | `english_level` | No | `"beginner"` (default) or `"intermediate"` |
 | `whatsapp_messages` | No | `true` (default) — whether to send messages |
 
 Returns `201 Created` with the created student object, or `409 Conflict` if the phone number already exists.
+
+When a student is created with `whatsapp_messages: true`, a Portuguese welcome WhatsApp message is sent to them immediately:
+
+> *Olá [Nome]! 👋 Você foi cadastrado(a) no serviço Palavra do Dia da XOXO Education.*
+>
+> *A partir de agora, você receberá uma mensagem diária com uma palavra ou frase em inglês para turbinar seu vocabulário! Para cancelar, basta responder STOP.*
+
+If the welcome message fails (e.g. due to a transient WaSenderAPI error), the failure is logged as a warning and the student is still created — `201` is still returned.
 
 **Example**
 ```bash
@@ -808,7 +817,8 @@ scripts/
 
 tests/
 ├── test_validators.py          # Validation rule tests
-└── test_service_happy_path.py  # Service integration tests
+├── test_service_happy_path.py  # Service integration tests
+└── test_enrollment.py          # Phone normalization, welcome message, and POST /students tests
 ```
 
 ---

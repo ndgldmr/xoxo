@@ -11,12 +11,12 @@ router = APIRouter(prefix="/webhook", tags=["webhooks"])
 
 STOP_CONFIRMATION = (
     'Você foi removido da lista de mensagens da XOXO Education. '
-    'Para voltar a receber as mensagens de Palavra/Frase do Dia, envie "START".'
+    'Para voltar a receber as mensagens de Palavra/Frase do Dia, envie *START*.'
 )
 
 START_CONFIRMATION = (
     'Você foi inscrito novamente na lista de mensagens da XOXO Education. '
-    'A próxima Palavra/Frase do Dia chegará amanhã. Para cancelar, envie "STOP".'
+    'A próxima Palavra/Frase do Dia chegará amanhã. Para cancelar, envie *STOP*.'
 )
 
 
