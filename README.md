@@ -16,7 +16,6 @@ WhatsApp "English Word/Phrase of the Day" service for Brazilian Portuguese speak
 - [Running the Server](#running-the-server)
 - [API Reference](#api-reference)
 - [Student Management](#student-management)
-- [Google Form Enrollment](#google-form-enrollment)
 - [CLI Reference](#cli-reference)
 - [Cron Setup](#cron-setup)
 - [Webhook: Opt-Out / Opt-In](#webhook-opt-out--opt-in)
@@ -36,7 +35,7 @@ WhatsApp "English Word/Phrase of the Day" service for Brazilian Portuguese speak
 - **Strict Validation** — All 6 message fields are validated for format, length, language, and content rules before sending
 - **Auto-Retry with Repair** — If validation fails, automatically retries with a repair prompt (up to 2 retries)
 - **Fallback Safety** — Never crashes — a safe fallback message is always delivered if generation fails
-- **Google Form Enrollment** — Students self-enroll via a Google Form; a linked Apps Script calls `POST /students`, creating the student and sending a Portuguese welcome WhatsApp message automatically
+- **Welcome Message** — When a student is added with `whatsapp_messages: true`, a Portuguese welcome WhatsApp message is sent to them automatically
 - **Opt-Out / Opt-In** — Students send "STOP" or "START" via WhatsApp; the webhook updates the database and sends a PT-BR confirmation automatically
 - **API Authentication** — All sensitive endpoints require an `X-API-Key` header
 - **Webhook Signature Verification** — WaSenderAPI webhook requests are verified using a shared secret via `X-Webhook-Signature`
@@ -554,58 +553,6 @@ python scripts/manage_students.py opt-out --phone "+5511999999999"
 ```
 
 > Phone numbers must be in **E.164 format**: `+` followed by country code and number, no spaces or dashes (e.g. `+5511999999999` for Brazil).
-
----
-
-## Google Form Enrollment
-
-Students can self-enroll through a Google Form. The form submission is forwarded to `POST /students` via a Google Apps Script, which creates the student in the database and triggers the welcome WhatsApp message automatically.
-
-### Form Fields
-
-Create a Google Form with the following questions (in this order):
-
-| # | Question | Type | Notes |
-|---|---|---|---|
-| 1 | First name | Short answer | |
-| 2 | Last name | Short answer | |
-| 3 | Phone number | Short answer | Instruct students: *"Enter in E.164 format, e.g. +5511999999999 (include country code)"* |
-| 4 | English level | Multiple choice | Options: `beginner`, `intermediate` |
-
-Google Forms always prepends a **Timestamp** column to the linked Sheet, so the script reads `e.values` as `[timestamp, first_name, last_name, phone, english_level]`.
-
-### Apps Script
-
-In the linked Google Sheet, go to **Extensions → Apps Script**, paste the following, and store your API key in **Project Settings → Script Properties** as `API_KEY`:
-
-```javascript
-function onFormSubmit(e) {
-  const row = e.values; // [timestamp, first_name, last_name, phone, english_level]
-  const apiKey = PropertiesService.getScriptProperties().getProperty("API_KEY");
-
-  UrlFetchApp.fetch("https://your-domain.com/students", {
-    method: "post",
-    contentType: "application/json",
-    headers: { "X-API-Key": apiKey },
-    payload: JSON.stringify({
-      phone_number: row[3],
-      first_name: row[1],
-      last_name: row[2],
-      english_level: row[4],
-      whatsapp_messages: true
-    })
-  });
-}
-```
-
-### Trigger Setup
-
-1. In the Apps Script editor, click **Triggers** (clock icon)
-2. Click **+ Add Trigger**
-3. Configure: function `onFormSubmit`, event source **From spreadsheet**, event type **On form submit**
-4. Click **Save** and authorize the script when prompted
-
-No deployment is required — Apps Script runs entirely within Google's infrastructure.
 
 ---
 
