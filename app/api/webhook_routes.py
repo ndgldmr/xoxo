@@ -76,7 +76,9 @@ async def whatsapp_webhook(request: Request, db: Session = Depends(get_db)):
         whatsapp = get_whatsapp_client()
         repo = StudentRepository(db)
 
-        if "stop" in body.lower():
+        command = body.lower()
+
+        if command == "stop":
             print(f"STOP request received from {phone_number}")
             success = repo.update_whatsapp_opt_out(phone_number)
             if success:
@@ -85,7 +87,7 @@ async def whatsapp_webhook(request: Request, db: Session = Depends(get_db)):
                 print(f"Warning: Student {phone_number} not found in database")
             whatsapp.send_message(to_number=phone_number, message=STOP_CONFIRMATION)
 
-        elif "start" in body.lower():
+        elif command == "start":
             print(f"START request received from {phone_number}")
             success = repo.update_whatsapp_opt_in(phone_number)
             if success:

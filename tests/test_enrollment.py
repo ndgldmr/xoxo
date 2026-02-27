@@ -9,7 +9,8 @@ import pytest
 from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
 
-from app.api.routes import app, normalize_phone
+from app.api.routes import app
+from app.api.deps import normalize_phone, get_db, verify_api_key
 from app.integrations.wasender_client import WaSenderClient
 
 
@@ -30,6 +31,8 @@ def make_mock_student(
     student.english_level = english_level
     student.whatsapp_messages = whatsapp_messages
     student.is_active = is_active
+    student.created_at = None
+    student.updated_at = None
     return student
 
 
@@ -46,6 +49,14 @@ def mock_settings():
     settings.dry_run = True
     settings.database_url = "postgresql://test"
     return settings
+
+
+@pytest.fixture(autouse=True)
+def clear_dependency_overrides():
+    """Bypass API key auth and clean up all overrides after each test."""
+    app.dependency_overrides[verify_api_key] = lambda: None
+    yield
+    app.dependency_overrides.clear()
 
 
 # ── normalize_phone ───────────────────────────────────────────────────────────
@@ -136,11 +147,12 @@ class TestAddStudentEndpoint:
         mock_repo.get_by_phone.return_value = None
         mock_repo.create.return_value = student
         mock_wasender = MagicMock()
+        mock_db = MagicMock()
+        app.dependency_overrides[get_db] = lambda: mock_db
 
-        with patch("app.api.routes.get_db_session"), \
-             patch("app.api.routes.StudentRepository", return_value=mock_repo), \
-             patch("app.api.routes.get_settings", return_value=mock_settings), \
-             patch("app.api.routes.WaSenderClient", return_value=mock_wasender):
+        with patch("app.api.routers.students.StudentRepository", return_value=mock_repo), \
+             patch("app.api.routers.students.get_settings", return_value=mock_settings), \
+             patch("app.api.routers.students.WaSenderClient", return_value=mock_wasender):
 
             response = http_client.post("/students", json={
                 "phone_number": "+5511999999999",
@@ -162,11 +174,12 @@ class TestAddStudentEndpoint:
         mock_repo.get_by_phone.return_value = None
         mock_repo.create.return_value = student
         mock_wasender = MagicMock()
+        mock_db = MagicMock()
+        app.dependency_overrides[get_db] = lambda: mock_db
 
-        with patch("app.api.routes.get_db_session"), \
-             patch("app.api.routes.StudentRepository", return_value=mock_repo), \
-             patch("app.api.routes.get_settings", return_value=mock_settings), \
-             patch("app.api.routes.WaSenderClient", return_value=mock_wasender):
+        with patch("app.api.routers.students.StudentRepository", return_value=mock_repo), \
+             patch("app.api.routers.students.get_settings", return_value=mock_settings), \
+             patch("app.api.routers.students.WaSenderClient", return_value=mock_wasender):
 
             response = http_client.post("/students", json={
                 "phone_number": "+1 (555) 123-4567",
@@ -179,10 +192,11 @@ class TestAddStudentEndpoint:
     def test_duplicate_phone_returns_409(self, http_client, mock_settings):
         mock_repo = MagicMock()
         mock_repo.get_by_phone.return_value = make_mock_student()
+        mock_db = MagicMock()
+        app.dependency_overrides[get_db] = lambda: mock_db
 
-        with patch("app.api.routes.get_db_session"), \
-             patch("app.api.routes.StudentRepository", return_value=mock_repo), \
-             patch("app.api.routes.get_settings", return_value=mock_settings):
+        with patch("app.api.routers.students.StudentRepository", return_value=mock_repo), \
+             patch("app.api.routers.students.get_settings", return_value=mock_settings):
 
             response = http_client.post("/students", json={
                 "phone_number": "+5511999999999",
@@ -192,11 +206,10 @@ class TestAddStudentEndpoint:
         assert response.status_code == 409
 
     def test_invalid_phone_returns_422(self, http_client, mock_settings):
-        with patch("app.api.routes.get_settings", return_value=mock_settings):
-            response = http_client.post("/students", json={
-                "phone_number": "not-a-phone",
-                "english_level": "beginner",
-            })
+        response = http_client.post("/students", json={
+            "phone_number": "not-a-phone",
+            "english_level": "beginner",
+        })
 
         assert response.status_code == 422
         assert "E.164" in response.json()["detail"][0]["msg"]
@@ -208,11 +221,12 @@ class TestAddStudentEndpoint:
         mock_repo.create.return_value = student
         mock_wasender = MagicMock()
         mock_wasender.send_welcome_message.side_effect = Exception("WaSender timeout")
+        mock_db = MagicMock()
+        app.dependency_overrides[get_db] = lambda: mock_db
 
-        with patch("app.api.routes.get_db_session"), \
-             patch("app.api.routes.StudentRepository", return_value=mock_repo), \
-             patch("app.api.routes.get_settings", return_value=mock_settings), \
-             patch("app.api.routes.WaSenderClient", return_value=mock_wasender):
+        with patch("app.api.routers.students.StudentRepository", return_value=mock_repo), \
+             patch("app.api.routers.students.get_settings", return_value=mock_settings), \
+             patch("app.api.routers.students.WaSenderClient", return_value=mock_wasender):
 
             response = http_client.post("/students", json={
                 "phone_number": "+5511999999999",
@@ -227,11 +241,12 @@ class TestAddStudentEndpoint:
         mock_repo.get_by_phone.return_value = None
         mock_repo.create.return_value = student
         mock_wasender = MagicMock()
+        mock_db = MagicMock()
+        app.dependency_overrides[get_db] = lambda: mock_db
 
-        with patch("app.api.routes.get_db_session"), \
-             patch("app.api.routes.StudentRepository", return_value=mock_repo), \
-             patch("app.api.routes.get_settings", return_value=mock_settings), \
-             patch("app.api.routes.WaSenderClient", return_value=mock_wasender):
+        with patch("app.api.routers.students.StudentRepository", return_value=mock_repo), \
+             patch("app.api.routers.students.get_settings", return_value=mock_settings), \
+             patch("app.api.routers.students.WaSenderClient", return_value=mock_wasender):
 
             response = http_client.post("/students", json={
                 "phone_number": "+5511999999999",

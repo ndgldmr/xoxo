@@ -21,6 +21,12 @@ class Settings(BaseSettings):
     # API Authentication
     api_key: str = ""  # Required in production
 
+    # GCP Cloud Scheduler (production-only; leave blank in local dev)
+    gcp_project_id: str = ""
+    gcp_location: str = ""          # e.g. "us-central1"
+    gcp_scheduler_job_id: str = ""  # e.g. "xoxo-daily-send"
+    service_url: str = ""           # Cloud Run URL, needed when updating the job's HTTP target URI
+
     # Application Settings
     dry_run: bool = True
     audit_log_path: str = "audit_log.jsonl"

@@ -155,6 +155,43 @@ class StudentRepository:
             return True
         return False
 
+    def update(self, phone_number: str, updates: dict) -> Optional[Student]:
+        """
+        Update a student's fields.
+
+        Args:
+            phone_number: Phone number of the student to update
+            updates: Dict of field names to new values (only provided fields are changed)
+
+        Returns:
+            Updated Student instance if found, None otherwise
+        """
+        student = self.get_by_phone(phone_number)
+        if not student:
+            return None
+        for key, value in updates.items():
+            if hasattr(student, key):
+                setattr(student, key, value)
+        self.session.flush()
+        return student
+
+    def reactivate(self, phone_number: str) -> bool:
+        """
+        Reactivate a previously deactivated student.
+
+        Args:
+            phone_number: Phone number of the student to reactivate
+
+        Returns:
+            True if student was found and reactivated, False otherwise
+        """
+        student = self.get_by_phone(phone_number)
+        if student:
+            student.is_active = True
+            self.session.flush()
+            return True
+        return False
+
     def list_all(self, include_inactive: bool = False) -> List[Student]:
         """
         List all students.

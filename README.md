@@ -186,6 +186,10 @@ cp .env.example .env
 | `WASENDER_WEBHOOK_SECRET` | Yes | — | Webhook secret from WaSenderAPI dashboard |
 | `DATABASE_URL` | Yes | — | PostgreSQL connection string |
 | `API_KEY` | Yes | — | Secret key required by all protected API endpoints |
+| `GCP_PROJECT_ID` | No | — | GCP project ID (production only, for schedule management) |
+| `GCP_LOCATION` | No | — | GCP region where the Cloud Scheduler job lives (e.g. `us-central1`) |
+| `GCP_SCHEDULER_JOB_ID` | No | — | Cloud Scheduler job name (e.g. `xoxo-daily-send`) |
+| `SERVICE_URL` | No | — | Cloud Run service URL (e.g. `https://xoxo-....run.app`) |
 | `DRY_RUN` | No | `true` | If `true`, prints messages instead of sending |
 | `AUDIT_LOG_PATH` | No | `audit_log.jsonl` | Path to the JSONL audit log file |
 | `SEND_DELAY_SECONDS` | No | `0.5` | Delay between sends in multi-recipient mode |
@@ -209,6 +213,12 @@ DATABASE_URL=postgresql://postgres:[PASSWORD]@db.[PROJECT-REF].supabase.co:5432/
 # API Authentication
 # Generate with: python -c "import secrets; print(secrets.token_hex(32))"
 API_KEY=your_generated_api_key
+
+# GCP Cloud Scheduler (production-only; leave blank for local dev)
+GCP_PROJECT_ID=your_gcp_project_id
+GCP_LOCATION=us-central1
+GCP_SCHEDULER_JOB_ID=xoxo-daily-send
+SERVICE_URL=https://your-cloud-run-service-url
 
 # Application
 DRY_RUN=false
@@ -403,6 +413,61 @@ curl -X POST https://your-domain.com/send-word-of-day \
 
 ---
 
+### `GET /schedule`
+
+Returns the current schedule config read live from the GCP Cloud Scheduler job. **Requires `X-API-Key`.** Returns `503` if GCP env vars are not set.
+
+**Response**
+```json
+{
+  "theme": "daily life",
+  "level": "beginner",
+  "send_time": "08:00",
+  "timezone": "America/Sao_Paulo"
+}
+```
+
+**Example**
+```bash
+curl https://your-domain.com/schedule \
+  -H "X-API-Key: your_api_key"
+```
+
+---
+
+### `PATCH /schedule`
+
+Updates the schedule config in the GCP Cloud Scheduler job. All fields are optional — only provided fields are changed. **Requires `X-API-Key`.** Returns `503` if GCP env vars are not set.
+
+**Request body** (all fields optional)
+```json
+{
+  "theme": "travel",
+  "level": "intermediate",
+  "send_time": "09:00",
+  "timezone": "America/Sao_Paulo"
+}
+```
+
+| Field | Type | Validation |
+|---|---|---|
+| `theme` | string | Any non-empty string |
+| `level` | string | `"beginner"`, `"intermediate"`, or `"advanced"` |
+| `send_time` | string | `HH:MM` format (e.g. `"09:00"`) |
+| `timezone` | string | IANA timezone string (e.g. `"America/Sao_Paulo"`) |
+
+Returns the full updated `ScheduleConfigResponse` after applying changes.
+
+**Example** — update only the send time:
+```bash
+curl -X PATCH https://your-domain.com/schedule \
+  -H "X-API-Key: your_api_key" \
+  -H "Content-Type: application/json" \
+  -d '{"send_time": "09:00"}'
+```
+
+---
+
 ### `GET /students`
 
 Lists all students. **Requires `X-API-Key`.**
@@ -515,8 +580,8 @@ This endpoint should only be called by WaSenderAPI — you do not need to call i
 
 | Student sends | DB change | Confirmation sent |
 |---|---|---|
-| `STOP` (case-insensitive) | `whatsapp_messages = false` | PT-BR opt-out confirmation + re-enrol instructions |
-| `START` (case-insensitive) | `whatsapp_messages = true` | PT-BR welcome-back confirmation |
+| `STOP` (exact, case-insensitive) | `whatsapp_messages = false` | PT-BR opt-out confirmation + re-enrol instructions |
+| `START` (exact, case-insensitive) | `whatsapp_messages = true` | PT-BR welcome-back confirmation |
 | Anything else | No change | No reply |
 
 ---
@@ -625,13 +690,37 @@ python -m app.main send --force
 
 ## Cron Setup
 
-To send the Word of the Day automatically every morning at 8 AM:
+### Production — GCP Cloud Scheduler
+
+In production the app is deployed on GCP Cloud Run and triggered by a GCP Cloud Scheduler job. The job calls `POST /send-word-of-day` on a cron schedule with the theme, level, and API key in the request.
+
+You can view and update the schedule via the API:
+
+```bash
+# View current schedule
+curl https://your-domain.com/schedule -H "X-API-Key: your_api_key"
+
+# Change send time to 9 AM
+curl -X PATCH https://your-domain.com/schedule \
+  -H "X-API-Key: your_api_key" \
+  -H "Content-Type: application/json" \
+  -d '{"send_time": "09:00"}'
+```
+
+Or manage directly via the GCP Console → Cloud Scheduler, or with `gcloud`:
+
+```bash
+gcloud scheduler jobs list --location=us-central1
+gcloud scheduler jobs describe xoxo-daily-send --location=us-central1
+```
+
+### Local dev — system cron
+
+For local development without GCP, add a crontab entry:
 
 ```bash
 crontab -e
 ```
-
-Add the following line (adjust paths to your installation):
 
 ```cron
 0 8 * * * cd /path/to/xoxo && /path/to/.venv/bin/python -m app.main send >> /var/log/xoxo.log 2>&1
@@ -649,7 +738,7 @@ WaSenderAPI forwards all incoming WhatsApp messages to your webhook URL. The han
 
 1. Verifies the `X-Webhook-Signature` header matches `WASENDER_WEBHOOK_SECRET`
 2. Ignores all events that are not `messages.received`
-3. Checks if the message body contains `"stop"` or `"start"` (case-insensitive)
+3. Checks if the message body is exactly `"stop"` or `"start"` (case-insensitive — messages containing these words alongside other text are ignored)
 4. Updates `whatsapp_messages` in the database
 5. Sends a Portuguese confirmation message back to the student
 
@@ -791,8 +880,15 @@ app/
 ├── main.py                     # CLI entry point (send, preview, health)
 ├── config.py                   # Environment variable configuration
 ├── api/
-│   ├── routes.py               # FastAPI app and all HTTP endpoints
-│   └── webhook_routes.py       # Webhook handler (STOP/START opt-outs)
+│   ├── routes.py               # FastAPI app factory and router registration
+│   ├── deps.py                 # Shared FastAPI dependencies (auth, DB, GCP client)
+│   ├── schemas.py              # Shared Pydantic request/response models
+│   ├── webhook_routes.py       # Webhook handler (STOP/START opt-outs)
+│   └── routers/
+│       ├── students.py         # Student CRUD endpoints
+│       ├── messages.py         # POST /send-word-of-day, GET /preview
+│       ├── admin.py            # GET /health, GET /stats, GET /audit-log
+│       └── schedule.py         # GET /schedule, PATCH /schedule
 ├── services/
 │   └── word_of_day_service.py  # Orchestration: generate → validate → send
 ├── domain/
@@ -800,7 +896,8 @@ app/
 │   └── fallback.py             # Safe fallback message parameters
 ├── integrations/
 │   ├── llm_client.py           # LLM API client (OpenAI-compatible)
-│   └── wasender_client.py      # WaSenderAPI client
+│   ├── wasender_client.py      # WaSenderAPI client
+│   └── gcp_scheduler.py        # GCP Cloud Scheduler client (get/update job)
 ├── logging/
 │   └── audit_log.py            # JSONL audit trail
 ├── db/
@@ -857,6 +954,16 @@ tests/
 - Confirm `WASENDER_WEBHOOK_SECRET` in `.env` matches the secret shown in the WaSenderAPI dashboard exactly
 - If running locally, use [ngrok](https://ngrok.com) to expose your server: `ngrok http 8000`
 - Check your server logs — a `401` response means the signature is not matching
+
+### `GET /schedule` or `PATCH /schedule` returning 503
+
+The schedule endpoints are production-only and require all four GCP env vars to be set: `GCP_PROJECT_ID`, `GCP_LOCATION`, `GCP_SCHEDULER_JOB_ID`, `SERVICE_URL`. Leave them blank in local dev and the 503 is expected.
+
+If the vars are set but you're still getting an error, make sure Application Default Credentials are configured:
+
+```bash
+gcloud auth application-default login
+```
 
 ### API returning 401
 
