@@ -876,46 +876,49 @@ pytest --cov=app tests/
 ## File Structure
 
 ```
-app/
-├── main.py                     # CLI entry point (send, preview, health)
-├── config.py                   # Environment variable configuration
-├── api/
-│   ├── routes.py               # FastAPI app factory and router registration
-│   ├── deps.py                 # Shared FastAPI dependencies (auth, DB, GCP client)
-│   ├── schemas.py              # Shared Pydantic request/response models
-│   ├── webhook_routes.py       # Webhook handler (STOP/START opt-outs)
-│   └── routers/
-│       ├── students.py         # Student CRUD endpoints
-│       ├── messages.py         # POST /send-word-of-day, GET /preview
-│       ├── admin.py            # GET /health, GET /stats, GET /audit-log
-│       └── schedule.py         # GET /schedule, PATCH /schedule
-├── services/
-│   └── word_of_day_service.py  # Orchestration: generate → validate → send
-├── domain/
-│   ├── validators.py           # Message validation rules
-│   └── fallback.py             # Safe fallback message parameters
-├── integrations/
-│   ├── llm_client.py           # LLM API client (OpenAI-compatible)
-│   ├── wasender_client.py      # WaSenderAPI client
-│   └── gcp_scheduler.py        # GCP Cloud Scheduler client (get/update job)
-├── logging/
-│   └── audit_log.py            # JSONL audit trail
-├── db/
-│   ├── base.py                 # SQLAlchemy Base and TimestampMixin
-│   ├── session.py              # Database engine and session management
-│   └── models/
-│       └── student.py          # Student ORM model
-└── repositories/
-    └── student.py              # Student CRUD operations
+backend/
+├── app/
+│   ├── main.py                     # CLI entry point (send, preview, health)
+│   ├── config.py                   # Environment variable configuration
+│   ├── api/
+│   │   ├── routes.py               # FastAPI app factory and router registration
+│   │   ├── deps.py                 # Shared FastAPI dependencies (auth, DB, GCP client)
+│   │   ├── schemas.py              # Shared Pydantic request/response models
+│   │   ├── webhook_routes.py       # Webhook handler (STOP/START opt-outs)
+│   │   └── routers/
+│   │       ├── students.py         # Student CRUD endpoints
+│   │       ├── messages.py         # POST /send-word-of-day, GET /preview
+│   │       ├── admin.py            # GET /health, GET /stats, GET /audit-log
+│   │       └── schedule.py         # GET /schedule, PATCH /schedule
+│   ├── services/
+│   │   └── word_of_day_service.py  # Orchestration: generate → validate → send
+│   ├── domain/
+│   │   ├── validators.py           # Message validation rules
+│   │   └── fallback.py             # Safe fallback message parameters
+│   ├── integrations/
+│   │   ├── llm_client.py           # LLM API client (OpenAI-compatible)
+│   │   ├── wasender_client.py      # WaSenderAPI client
+│   │   └── gcp_scheduler.py        # GCP Cloud Scheduler client (get/update job)
+│   ├── logging/
+│   │   └── audit_log.py            # JSONL audit trail
+│   ├── db/
+│   │   ├── base.py                 # SQLAlchemy Base and TimestampMixin
+│   │   ├── session.py              # Database engine and session management
+│   │   └── models/
+│   │       └── student.py          # Student ORM model
+│   └── repositories/
+│       └── student.py              # Student CRUD operations
+├── scripts/
+│   ├── init_db.py                  # Create all database tables
+│   └── manage_students.py          # Student management CLI (add, list, remove, opt-out)
+├── tests/
+│   ├── test_validators.py          # Validation rule tests
+│   ├── test_service_happy_path.py  # Service integration tests
+│   └── test_enrollment.py          # Phone normalization, welcome message, and POST /students tests
+├── Dockerfile
+└── pyproject.toml
 
-scripts/
-├── init_db.py                  # Create all database tables
-└── manage_students.py          # Student management CLI (add, list, remove, opt-out)
-
-tests/
-├── test_validators.py          # Validation rule tests
-├── test_service_happy_path.py  # Service integration tests
-└── test_enrollment.py          # Phone normalization, welcome message, and POST /students tests
+frontend/                           # React dashboard (coming soon)
 ```
 
 ---
