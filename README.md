@@ -14,6 +14,7 @@ WhatsApp "English Word/Phrase of the Day" service for Brazilian Portuguese speak
 - [Database Setup](#database-setup)
 - [WaSenderAPI Setup](#wasenderapi-setup)
 - [Running the Server](#running-the-server)
+- [Admin Dashboard](#admin-dashboard)
 - [API Reference](#api-reference)
 - [Student Management](#student-management)
 - [CLI Reference](#cli-reference)
@@ -43,6 +44,7 @@ WhatsApp "English Word/Phrase of the Day" service for Brazilian Portuguese speak
 - **Audit Logging** — JSONL-based audit trail of every send with full per-student tracking
 - **Dry Run Mode** — Test everything without actually sending messages
 - **CLI & API** — Run via command line or FastAPI HTTP server
+- **Admin Dashboard** — React web UI for managing students (add, deactivate, reactivate, delete)
 
 ---
 
@@ -145,10 +147,14 @@ Student sends "STOP" or "START" via WhatsApp
 
 ## Prerequisites
 
+**Backend**
 - Python 3.11+
 - A [Supabase](https://supabase.com) project (PostgreSQL database)
 - An LLM API key — [Google Gemini](https://aistudio.google.com/apikey) (free tier available) or [OpenAI](https://platform.openai.com/api-keys)
 - A [WaSenderAPI](https://wasenderapi.com) account with an active WhatsApp session
+
+**Frontend**
+- Node.js 18+
 
 ---
 
@@ -193,6 +199,7 @@ cp .env.example .env
 | `DRY_RUN` | No | `true` | If `true`, prints messages instead of sending |
 | `AUDIT_LOG_PATH` | No | `audit_log.jsonl` | Path to the JSONL audit log file |
 | `SEND_DELAY_SECONDS` | No | `0.5` | Delay between sends in multi-recipient mode |
+| `ALLOWED_ORIGINS` | No | `""` (allow all) | Comma-separated list of CORS origins allowed to call the API (e.g. `https://xoxo.vercel.app,http://localhost:5173`) |
 
 ### Example `.env` (production)
 
@@ -224,6 +231,9 @@ SERVICE_URL=https://your-cloud-run-service-url
 DRY_RUN=false
 AUDIT_LOG_PATH=audit_log.jsonl
 SEND_DELAY_SECONDS=6
+
+# CORS — allow the Vercel dashboard (and local dev)
+ALLOWED_ORIGINS=https://xoxo.vercel.app,http://localhost:5173
 ```
 
 > **Tip:** For high-concurrency deployments, use Supabase's connection pooler URL (port 6543) instead of the direct connection (port 5432). Find it under Project Settings → Database → Connection pooling.
@@ -252,7 +262,7 @@ Initializing database...
 | `phone_number` | `VARCHAR(20)` PK | E.164 format, e.g. `+5511999999999` |
 | `first_name` | `VARCHAR(100)` nullable | Student's first name |
 | `last_name` | `VARCHAR(100)` nullable | Student's last name |
-| `english_level` | `VARCHAR(20)` | `beginner` or `intermediate` |
+| `english_level` | `VARCHAR(20)` | `beginner`, `intermediate`, or `advanced` |
 | `whatsapp_messages` | `BOOLEAN` | `true` = subscribed, `false` = opted out |
 | `is_active` | `BOOLEAN` | `false` = soft-deleted |
 | `created_at` | `TIMESTAMP WITH TIME ZONE` | Auto-set on creation |
@@ -286,6 +296,65 @@ uvicorn app.api.routes:app --reload --port 8000
 ```
 
 The API will be available at `http://localhost:8000`. Interactive docs at `http://localhost:8000/docs`.
+
+---
+
+## Admin Dashboard
+
+A React single-page app for managing students. It talks directly to the backend API using your `API_KEY`.
+
+### Installation
+
+```bash
+cd frontend
+npm install
+```
+
+### Configuration
+
+```bash
+cp .env.example .env
+```
+
+Set `VITE_API_URL` in `frontend/.env` to point at your backend:
+
+| Variable | Description |
+|---|---|
+| `VITE_API_URL` | Backend base URL (default: `http://localhost:8000`) |
+
+### Running locally
+
+```bash
+# Terminal 1 — backend
+cd backend && uvicorn app.api.routes:app --reload
+
+# Terminal 2 — frontend
+cd frontend && npm run dev
+```
+
+The dashboard opens at `http://localhost:5173`.
+
+### Login
+
+The dashboard has a login screen. Enter your `API_KEY` (the same value as `API_KEY` in the backend `.env`). The key is verified against the live backend and stored in `sessionStorage` for the duration of the browser tab — it is cleared on logout or when the tab is closed.
+
+### Students tab
+
+| Action | Description |
+|---|---|
+| **Add Student** | Opens a dialog — enter phone number, first/last name, and level (Beginner / Intermediate / Advanced) |
+| **Edit** | Opens a pre-filled dialog to update first name, last name, or level (phone number is read-only) |
+| **Deactivate** | Soft-disables a student; they stop receiving messages |
+| **Reactivate** | Re-enables a previously deactivated student |
+| **Delete** | Hard-deletes a student after a confirmation dialog |
+| **Show inactive** | Toggle to include/exclude inactive students in the table |
+
+### Deployment (Vercel)
+
+1. Push the repo to GitHub
+2. Create a new Vercel project pointed at the `frontend/` directory
+3. Set `VITE_API_URL` in Vercel's Environment Variables to your Cloud Run URL (e.g. `https://xoxo-....run.app`)
+4. Add the Vercel deployment URL to `ALLOWED_ORIGINS` in the backend `.env` (or Cloud Run environment variables)
 
 ---
 
@@ -550,6 +619,32 @@ curl -X POST https://your-domain.com/students \
     "english_level": "beginner",
     "whatsapp_messages": true
   }'
+```
+
+---
+
+### `PATCH /students/{phone_number}`
+
+Updates one or more fields for an existing student. All fields are optional — only provided fields are changed. **Requires `X-API-Key`.**
+
+**Request body** (all fields optional)
+```json
+{
+  "first_name": "Maria",
+  "last_name": "Silva",
+  "english_level": "intermediate",
+  "whatsapp_messages": true
+}
+```
+
+Returns the updated student object, or `404 Not Found` if the student doesn't exist.
+
+**Example** — update level only:
+```bash
+curl -X PATCH "https://your-domain.com/students/+5511999999999" \
+  -H "X-API-Key: your_api_key" \
+  -H "Content-Type: application/json" \
+  -d '{"english_level": "advanced"}'
 ```
 
 ---
@@ -918,7 +1013,27 @@ backend/
 ├── Dockerfile
 └── pyproject.toml
 
-frontend/                           # React dashboard (coming soon)
+frontend/
+├── src/
+│   ├── api/
+│   │   ├── client.ts               # Base fetch wrapper (attaches X-API-Key, throws on non-2xx)
+│   │   └── students.ts             # Typed functions for all student endpoints
+│   ├── components/
+│   │   ├── ui/                     # shadcn/ui primitives (Button, Table, Dialog, etc.)
+│   │   ├── LoginScreen.tsx         # API key entry form
+│   │   ├── StudentsTab.tsx         # Student table + toolbar
+│   │   ├── AddStudentDialog.tsx    # Add student form dialog
+│   │   └── DeleteConfirmDialog.tsx # Hard-delete confirmation dialog
+│   ├── lib/
+│   │   └── utils.ts                # shadcn/ui utility (cn)
+│   ├── App.tsx                     # Auth gate — shows LoginScreen or StudentsTab
+│   ├── main.tsx                    # React Query provider + render
+│   └── index.css                   # Tailwind + shadcn CSS variables
+├── .env.example                    # VITE_API_URL=http://localhost:8000
+├── components.json                 # shadcn/ui config
+├── package.json
+├── tsconfig.json
+└── vite.config.ts
 ```
 
 ---

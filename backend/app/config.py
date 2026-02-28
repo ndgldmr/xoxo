@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     gcp_scheduler_job_id: str = ""  # e.g. "xoxo-daily-send"
     service_url: str = ""           # Cloud Run URL, needed when updating the job's HTTP target URI
 
+    # CORS
+    allowed_origins: str = ""  # comma-separated, e.g. "https://xoxo.vercel.app,http://localhost:5173"
+
     # Application Settings
     dry_run: bool = True
     audit_log_path: str = "audit_log.jsonl"

@@ -1,5 +1,6 @@
 """FastAPI application factory."""
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.api.routers.students import router as students_router
@@ -8,10 +9,19 @@ from app.api.routers.admin import router as admin_router
 from app.api.routers.schedule import router as schedule_router
 from app.api.webhook_routes import router as webhook_router
 
+settings = get_settings()
+
 app = FastAPI(
     title="XOXO Education - Word of the Day",
     description="WhatsApp English Word/Phrase of the Day service",
     version="0.1.0",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.allowed_origins.split(",") if settings.allowed_origins else ["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 app.include_router(students_router)
