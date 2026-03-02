@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, useMemo } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   Table,
@@ -10,17 +10,23 @@ import {
 } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { AddStudentDialog } from "./AddStudentDialog"
 import { DeleteConfirmDialog } from "./DeleteConfirmDialog"
 import { EditStudentDialog } from "./EditStudentDialog"
 import { deactivateStudent, listStudents, reactivateStudent, type Student } from "@/api/students"
 
-interface Props {
-  onLogout: () => void
-}
-
-export function StudentsTab({ onLogout }: Props) {
+export function StudentsTab() {
   const [includeInactive, setIncludeInactive] = useState(false)
+  const [search, setSearch] = useState("")
+  const [levelFilter, setLevelFilter] = useState("all")
   const [addOpen, setAddOpen] = useState(false)
   const [editStudent, setEditStudent] = useState<Student | null>(null)
   const [deletePhone, setDeletePhone] = useState<string | null>(null)
@@ -30,6 +36,19 @@ export function StudentsTab({ onLogout }: Props) {
     queryKey: ["students", includeInactive],
     queryFn: () => listStudents(includeInactive),
   })
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return students.filter((s) => {
+      const matchesSearch =
+        !q ||
+        s.phone_number.toLowerCase().includes(q) ||
+        s.first_name.toLowerCase().includes(q) ||
+        s.last_name.toLowerCase().includes(q)
+      const matchesLevel = levelFilter === "all" || s.english_level === levelFilter
+      return matchesSearch && matchesLevel
+    })
+  }, [students, search, levelFilter])
 
   const deactivate = useMutation({
     mutationFn: deactivateStudent,
@@ -42,19 +61,30 @@ export function StudentsTab({ onLogout }: Props) {
   })
 
   return (
-    <div className="min-h-screen bg-background p-6">
-      <div className="mx-auto max-w-6xl space-y-4">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-semibold">XOXO Admin — Students</h1>
-          <Button variant="outline" size="sm" onClick={onLogout}>
-            Logout
-          </Button>
-        </div>
-
+    <div className="space-y-4">
         {/* Toolbar */}
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <Button onClick={() => setAddOpen(true)}>+ Add Student</Button>
+
+          <Input
+            placeholder="Search by name or phone…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-56"
+          />
+
+          <Select value={levelFilter} onValueChange={setLevelFilter}>
+            <SelectTrigger className="w-40">
+              <SelectValue placeholder="All levels" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All levels</SelectItem>
+              <SelectItem value="beginner">Beginner</SelectItem>
+              <SelectItem value="intermediate">Intermediate</SelectItem>
+              <SelectItem value="advanced">Advanced</SelectItem>
+            </SelectContent>
+          </Select>
+
           <label className="flex cursor-pointer items-center gap-2 text-sm select-none">
             <input
               type="checkbox"
@@ -64,6 +94,16 @@ export function StudentsTab({ onLogout }: Props) {
             />
             Show inactive
           </label>
+
+          {(search || levelFilter !== "all") && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => { setSearch(""); setLevelFilter("all") }}
+            >
+              Clear filters
+            </Button>
+          )}
         </div>
 
         {/* Table */}
@@ -86,14 +126,14 @@ export function StudentsTab({ onLogout }: Props) {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {students.length === 0 && (
+                {filtered.length === 0 && (
                   <TableRow>
                     <TableCell colSpan={7} className="text-center text-muted-foreground">
-                      No students found.
+                      {students.length === 0 ? "No students found." : "No students match your filters."}
                     </TableCell>
                   </TableRow>
                 )}
-                {students.map((s) => (
+                {filtered.map((s) => (
                   <TableRow key={s.phone_number} className={!s.is_active ? "opacity-50" : ""}>
                     <TableCell className="font-mono text-sm">{s.phone_number}</TableCell>
                     <TableCell>{s.first_name}</TableCell>
@@ -148,7 +188,6 @@ export function StudentsTab({ onLogout }: Props) {
             </Table>
           </div>
         )}
-      </div>
 
       <AddStudentDialog open={addOpen} onOpenChange={setAddOpen} />
       <EditStudentDialog student={editStudent} onOpenChange={setEditStudent} />
