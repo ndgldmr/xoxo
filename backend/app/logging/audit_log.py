@@ -2,7 +2,7 @@
 import json
 from datetime import datetime, date
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 
 
 class AuditLog:
@@ -104,6 +104,43 @@ class AuditLog:
                         events.append(event)
 
         return events
+
+    def get_events(
+        self,
+        date_str: Optional[str] = None,
+        phone_number: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get audit log events with optional filtering.
+
+        Args:
+            date_str: ISO date string to filter by (e.g., "2026-02-26"). Defaults to all dates.
+            phone_number: Filter by recipient phone number.
+            limit: Maximum number of events to return.
+            offset: Number of events to skip (for pagination).
+
+        Returns:
+            List of matching event dicts, most recent first.
+        """
+        if not self.log_path.exists():
+            return []
+
+        events = []
+        with self.log_path.open("r", encoding="utf-8") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                event = json.loads(line)
+                if date_str and event.get("date") != date_str:
+                    continue
+                if phone_number and event.get("phone_number") != phone_number:
+                    continue
+                events.append(event)
+
+        events.reverse()  # most recent first
+        return events[offset : offset + limit]
 
     def was_sent_today(self) -> bool:
         """

@@ -14,8 +14,10 @@ WhatsApp "English Word/Phrase of the Day" service for Brazilian Portuguese speak
 - [Database Setup](#database-setup)
 - [WaSenderAPI Setup](#wasenderapi-setup)
 - [Running the Server](#running-the-server)
+- [Admin Dashboard](#admin-dashboard)
 - [API Reference](#api-reference)
 - [Student Management](#student-management)
+- [Dashboard Stats](#dashboard-stats)
 - [CLI Reference](#cli-reference)
 - [Cron Setup](#cron-setup)
 - [Webhook: Opt-Out / Opt-In](#webhook-opt-out--opt-in)
@@ -43,6 +45,7 @@ WhatsApp "English Word/Phrase of the Day" service for Brazilian Portuguese speak
 - **Audit Logging** — JSONL-based audit trail of every send with full per-student tracking
 - **Dry Run Mode** — Test everything without actually sending messages
 - **CLI & API** — Run via command line or FastAPI HTTP server
+- **Admin Dashboard** — React web UI for managing students (add, edit, deactivate, reactivate, delete) and configuring the send schedule
 
 ---
 
@@ -145,10 +148,14 @@ Student sends "STOP" or "START" via WhatsApp
 
 ## Prerequisites
 
+**Backend**
 - Python 3.11+
 - A [Supabase](https://supabase.com) project (PostgreSQL database)
 - An LLM API key — [Google Gemini](https://aistudio.google.com/apikey) (free tier available) or [OpenAI](https://platform.openai.com/api-keys)
 - A [WaSenderAPI](https://wasenderapi.com) account with an active WhatsApp session
+
+**Frontend**
+- Node.js 18+
 
 ---
 
@@ -186,9 +193,14 @@ cp .env.example .env
 | `WASENDER_WEBHOOK_SECRET` | Yes | — | Webhook secret from WaSenderAPI dashboard |
 | `DATABASE_URL` | Yes | — | PostgreSQL connection string |
 | `API_KEY` | Yes | — | Secret key required by all protected API endpoints |
+| `GCP_PROJECT_ID` | No | — | GCP project ID (production only, for schedule management) |
+| `GCP_LOCATION` | No | — | GCP region where the Cloud Scheduler job lives (e.g. `us-central1`) |
+| `GCP_SCHEDULER_JOB_ID` | No | — | Cloud Scheduler job name (e.g. `xoxo-daily-send`) |
+| `SERVICE_URL` | No | — | Cloud Run service URL (e.g. `https://xoxo-....run.app`) |
 | `DRY_RUN` | No | `true` | If `true`, prints messages instead of sending |
 | `AUDIT_LOG_PATH` | No | `audit_log.jsonl` | Path to the JSONL audit log file |
 | `SEND_DELAY_SECONDS` | No | `0.5` | Delay between sends in multi-recipient mode |
+| `ALLOWED_ORIGINS` | No | `""` (allow all) | Comma-separated list of CORS origins allowed to call the API (e.g. `https://xoxo.vercel.app,http://localhost:5173`) |
 
 ### Example `.env` (production)
 
@@ -210,10 +222,19 @@ DATABASE_URL=postgresql://postgres:[PASSWORD]@db.[PROJECT-REF].supabase.co:5432/
 # Generate with: python -c "import secrets; print(secrets.token_hex(32))"
 API_KEY=your_generated_api_key
 
+# GCP Cloud Scheduler (production-only; leave blank for local dev)
+GCP_PROJECT_ID=your_gcp_project_id
+GCP_LOCATION=us-central1
+GCP_SCHEDULER_JOB_ID=xoxo-daily-send
+SERVICE_URL=https://your-cloud-run-service-url
+
 # Application
 DRY_RUN=false
 AUDIT_LOG_PATH=audit_log.jsonl
 SEND_DELAY_SECONDS=6
+
+# CORS — allow the Vercel dashboard (and local dev)
+ALLOWED_ORIGINS=https://xoxo.vercel.app,http://localhost:5173
 ```
 
 > **Tip:** For high-concurrency deployments, use Supabase's connection pooler URL (port 6543) instead of the direct connection (port 5432). Find it under Project Settings → Database → Connection pooling.
@@ -242,7 +263,7 @@ Initializing database...
 | `phone_number` | `VARCHAR(20)` PK | E.164 format, e.g. `+5511999999999` |
 | `first_name` | `VARCHAR(100)` nullable | Student's first name |
 | `last_name` | `VARCHAR(100)` nullable | Student's last name |
-| `english_level` | `VARCHAR(20)` | `beginner` or `intermediate` |
+| `english_level` | `VARCHAR(20)` | `beginner`, `intermediate`, or `advanced` |
 | `whatsapp_messages` | `BOOLEAN` | `true` = subscribed, `false` = opted out |
 | `is_active` | `BOOLEAN` | `false` = soft-deleted |
 | `created_at` | `TIMESTAMP WITH TIME ZONE` | Auto-set on creation |
@@ -276,6 +297,80 @@ uvicorn app.api.routes:app --reload --port 8000
 ```
 
 The API will be available at `http://localhost:8000`. Interactive docs at `http://localhost:8000/docs`.
+
+---
+
+## Admin Dashboard
+
+A React single-page app for managing students. It talks directly to the backend API using your `API_KEY`.
+
+### Installation
+
+```bash
+cd frontend
+npm install
+```
+
+### Configuration
+
+```bash
+cp .env.example .env
+```
+
+Set `VITE_API_URL` in `frontend/.env` to point at your backend:
+
+| Variable | Description |
+|---|---|
+| `VITE_API_URL` | Backend base URL (default: `http://localhost:8000`) |
+
+### Running locally
+
+```bash
+# Terminal 1 — backend
+cd backend && uvicorn app.api.routes:app --reload
+
+# Terminal 2 — frontend
+cd frontend && npm run dev
+```
+
+The dashboard opens at `http://localhost:5173`.
+
+### Login
+
+The dashboard has a login screen. Enter your `API_KEY` (the same value as `API_KEY` in the backend `.env`). The key is verified against the live backend and stored in `sessionStorage` for the duration of the browser tab — it is cleared on logout or when the tab is closed.
+
+### Students tab
+
+| Action | Description |
+|---|---|
+| **Add Student** | Opens a dialog — enter phone number, first/last name, and level (Beginner / Intermediate / Advanced) |
+| **Edit** | Opens a pre-filled dialog to update first name, last name, or level (phone number is read-only) |
+| **Deactivate** | Soft-disables a student; they stop receiving messages |
+| **Reactivate** | Re-enables a previously deactivated student |
+| **Delete** | Hard-deletes a student after a confirmation dialog |
+| **Show inactive** | Toggle to include/exclude inactive students in the table |
+| **Search** | Filter students by name or phone number |
+| **Level filter** | Filter students by English level |
+
+### Schedule tab
+
+Configure the automated daily send schedule. Changes are applied live to the GCP Cloud Scheduler job.
+
+| Field | Description |
+|---|---|
+| **Send time** | Time of day to send the message (HH:MM) |
+| **Timezone** | IANA timezone for the send time (e.g. `America/Sao_Paulo`) |
+| **Theme** | Topic hint passed to the LLM (e.g. `"travel"`, `"work"`) |
+| **Level** | English level for the generated message (`beginner`, `intermediate`, `advanced`) |
+
+> **Note:** The Schedule tab returns a 503 error in local development unless all four GCP environment variables are configured.
+
+### Deployment (Vercel)
+
+1. Push the repo to GitHub
+2. Create a new Vercel project pointed at the `frontend/` directory
+3. Set `VITE_API_URL` in Vercel's Environment Variables to your Cloud Run URL (e.g. `https://xoxo-....run.app`)
+4. Add the Vercel deployment URL to `ALLOWED_ORIGINS` in the backend `.env` (or Cloud Run environment variables)
 
 ---
 
@@ -351,7 +446,7 @@ Generates and sends a Word of the Day message to all active subscribers. **Requi
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `theme` | string | `"daily life"` | Topic theme for the LLM prompt (e.g. `"work"`, `"travel"`, `"food"`) |
-| `level` | string | `"beginner"` | `"beginner"` or `"intermediate"` |
+| `level` | string | `"beginner"` | `"beginner"`, `"intermediate"`, or `"advanced"` |
 | `force` | boolean | `false` | If `true`, sends even if a message was already sent today |
 
 **Response**
@@ -403,6 +498,61 @@ curl -X POST https://your-domain.com/send-word-of-day \
 
 ---
 
+### `GET /schedule`
+
+Returns the current schedule config read live from the GCP Cloud Scheduler job. **Requires `X-API-Key`.** Returns `503` if GCP env vars are not set.
+
+**Response**
+```json
+{
+  "theme": "daily life",
+  "level": "beginner",
+  "send_time": "08:00",
+  "timezone": "America/Sao_Paulo"
+}
+```
+
+**Example**
+```bash
+curl https://your-domain.com/schedule \
+  -H "X-API-Key: your_api_key"
+```
+
+---
+
+### `PATCH /schedule`
+
+Updates the schedule config in the GCP Cloud Scheduler job. All fields are optional — only provided fields are changed. **Requires `X-API-Key`.** Returns `503` if GCP env vars are not set.
+
+**Request body** (all fields optional)
+```json
+{
+  "theme": "travel",
+  "level": "intermediate",
+  "send_time": "09:00",
+  "timezone": "America/Sao_Paulo"
+}
+```
+
+| Field | Type | Validation |
+|---|---|---|
+| `theme` | string | Any non-empty string |
+| `level` | string | `"beginner"`, `"intermediate"`, or `"advanced"` |
+| `send_time` | string | `HH:MM` format (e.g. `"09:00"`) |
+| `timezone` | string | IANA timezone string (e.g. `"America/Sao_Paulo"`) |
+
+Returns the full updated `ScheduleConfigResponse` after applying changes.
+
+**Example** — update only the send time:
+```bash
+curl -X PATCH https://your-domain.com/schedule \
+  -H "X-API-Key: your_api_key" \
+  -H "Content-Type: application/json" \
+  -d '{"send_time": "09:00"}'
+```
+
+---
+
 ### `GET /students`
 
 Lists all students. **Requires `X-API-Key`.**
@@ -440,6 +590,20 @@ curl "https://your-domain.com/students?include_inactive=true" \
 
 ---
 
+### `GET /students/{phone_number}`
+
+Returns a single student by phone number. **Requires `X-API-Key`.**
+
+Returns `404 Not Found` if the student doesn't exist.
+
+**Example**
+```bash
+curl "https://your-domain.com/students/%2B5511999999999" \
+  -H "X-API-Key: your_api_key"
+```
+
+---
+
 ### `POST /students`
 
 Adds a new student. **Requires `X-API-Key`.**
@@ -460,7 +624,7 @@ Adds a new student. **Requires `X-API-Key`.**
 | `phone_number` | Yes | E.164 format (e.g. `+5511999999999`). Light normalization is applied automatically — formatting characters such as spaces, dashes, parentheses, and dots are stripped, and a leading `+` is added if missing. The result must be `+` followed by 7–15 digits. |
 | `first_name` | No | Student's first name |
 | `last_name` | No | Student's last name |
-| `english_level` | No | `"beginner"` (default) or `"intermediate"` |
+| `english_level` | No | `"beginner"` (default), `"intermediate"`, or `"advanced"` |
 | `whatsapp_messages` | No | `true` (default) — whether to send messages |
 
 Returns `201 Created` with the created student object, or `409 Conflict` if the phone number already exists.
@@ -485,6 +649,60 @@ curl -X POST https://your-domain.com/students \
     "english_level": "beginner",
     "whatsapp_messages": true
   }'
+```
+
+---
+
+### `PATCH /students/{phone_number}`
+
+Updates one or more fields for an existing student. All fields are optional — only provided fields are changed. **Requires `X-API-Key`.**
+
+**Request body** (all fields optional)
+```json
+{
+  "first_name": "Maria",
+  "last_name": "Silva",
+  "english_level": "intermediate",
+  "whatsapp_messages": true
+}
+```
+
+Returns the updated student object, or `404 Not Found` if the student doesn't exist.
+
+**Example** — update level only:
+```bash
+curl -X PATCH "https://your-domain.com/students/+5511999999999" \
+  -H "X-API-Key: your_api_key" \
+  -H "Content-Type: application/json" \
+  -d '{"english_level": "advanced"}'
+```
+
+---
+
+### `POST /students/{phone_number}/deactivate`
+
+Soft-deletes a student — sets `is_active = false` so they no longer receive messages but remain in the database. **Requires `X-API-Key`.**
+
+Returns `200` with the updated student object, or `404 Not Found` if the student doesn't exist.
+
+**Example**
+```bash
+curl -X POST "https://your-domain.com/students/%2B5511999999999/deactivate" \
+  -H "X-API-Key: your_api_key"
+```
+
+---
+
+### `POST /students/{phone_number}/reactivate`
+
+Re-enables a previously deactivated student — sets `is_active = true`. **Requires `X-API-Key`.**
+
+Returns `200` with the updated student object, or `404 Not Found` if the student doesn't exist.
+
+**Example**
+```bash
+curl -X POST "https://your-domain.com/students/%2B5511999999999/reactivate" \
+  -H "X-API-Key: your_api_key"
 ```
 
 ---
@@ -515,9 +733,70 @@ This endpoint should only be called by WaSenderAPI — you do not need to call i
 
 | Student sends | DB change | Confirmation sent |
 |---|---|---|
-| `STOP` (case-insensitive) | `whatsapp_messages = false` | PT-BR opt-out confirmation + re-enrol instructions |
-| `START` (case-insensitive) | `whatsapp_messages = true` | PT-BR welcome-back confirmation |
+| `STOP` (exact, case-insensitive) | `whatsapp_messages = false` | PT-BR opt-out confirmation + re-enrol instructions |
+| `START` (exact, case-insensitive) | `whatsapp_messages = true` | PT-BR welcome-back confirmation |
 | Anything else | No change | No reply |
+
+---
+
+### `GET /stats`
+
+Returns aggregate dashboard statistics. **Requires `X-API-Key`.**
+
+**Response**
+```json
+{
+  "total_students": 15,
+  "active_students": 12,
+  "inactive_students": 3,
+  "subscribed_students": 11,
+  "opted_out_students": 1,
+  "sent_today": true,
+  "sends_today": 11
+}
+```
+
+**Example**
+```bash
+curl https://your-domain.com/stats \
+  -H "X-API-Key: your_api_key"
+```
+
+---
+
+### `GET /audit-log`
+
+Returns paginated audit log entries with optional filtering. **Requires `X-API-Key`.**
+
+**Query parameters**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `date_str` | string | — | ISO date string to filter by (e.g. `2026-02-20`) |
+| `phone_number` | string | — | Filter to a specific student's phone number |
+| `limit` | integer | `50` | Maximum entries to return |
+| `offset` | integer | `0` | Number of entries to skip (for pagination) |
+
+**Example**
+```bash
+# All entries for today
+curl "https://your-domain.com/audit-log?date_str=2026-02-20" \
+  -H "X-API-Key: your_api_key"
+
+# A specific student's history
+curl "https://your-domain.com/audit-log?phone_number=%2B5511999999999&limit=10" \
+  -H "X-API-Key: your_api_key"
+```
+
+---
+
+## Dashboard Stats
+
+The `GET /stats` endpoint provides real-time counts used by the admin dashboard:
+
+- **total / active / inactive** — student counts
+- **subscribed / opted_out** — WhatsApp opt-in status counts
+- **sent_today / sends_today** — whether a message was sent today and how many students received it (based on the JSONL audit log)
 
 ---
 
@@ -619,19 +898,43 @@ python -m app.main send --force
 
 **Available themes:** `daily life`, `work`, `travel`, `emotions`, `food`, `shopping`, `health`, `technology`, and more — any topic phrase works.
 
-**Available levels:** `beginner`, `intermediate`
+**Available levels:** `beginner`, `intermediate`, `advanced`
 
 ---
 
 ## Cron Setup
 
-To send the Word of the Day automatically every morning at 8 AM:
+### Production — GCP Cloud Scheduler
+
+In production the app is deployed on GCP Cloud Run and triggered by a GCP Cloud Scheduler job. The job calls `POST /send-word-of-day` on a cron schedule with the theme, level, and API key in the request.
+
+You can view and update the schedule via the API:
+
+```bash
+# View current schedule
+curl https://your-domain.com/schedule -H "X-API-Key: your_api_key"
+
+# Change send time to 9 AM
+curl -X PATCH https://your-domain.com/schedule \
+  -H "X-API-Key: your_api_key" \
+  -H "Content-Type: application/json" \
+  -d '{"send_time": "09:00"}'
+```
+
+Or manage directly via the GCP Console → Cloud Scheduler, or with `gcloud`:
+
+```bash
+gcloud scheduler jobs list --location=us-central1
+gcloud scheduler jobs describe xoxo-daily-send --location=us-central1
+```
+
+### Local dev — system cron
+
+For local development without GCP, add a crontab entry:
 
 ```bash
 crontab -e
 ```
-
-Add the following line (adjust paths to your installation):
 
 ```cron
 0 8 * * * cd /path/to/xoxo && /path/to/.venv/bin/python -m app.main send >> /var/log/xoxo.log 2>&1
@@ -649,7 +952,7 @@ WaSenderAPI forwards all incoming WhatsApp messages to your webhook URL. The han
 
 1. Verifies the `X-Webhook-Signature` header matches `WASENDER_WEBHOOK_SECRET`
 2. Ignores all events that are not `messages.received`
-3. Checks if the message body contains `"stop"` or `"start"` (case-insensitive)
+3. Checks if the message body is exactly `"stop"` or `"start"` (case-insensitive — messages containing these words alongside other text are ignored)
 4. Updates `whatsapp_messages` in the database
 5. Sends a Portuguese confirmation message back to the student
 
@@ -787,38 +1090,72 @@ pytest --cov=app tests/
 ## File Structure
 
 ```
-app/
-├── main.py                     # CLI entry point (send, preview, health)
-├── config.py                   # Environment variable configuration
-├── api/
-│   ├── routes.py               # FastAPI app and all HTTP endpoints
-│   └── webhook_routes.py       # Webhook handler (STOP/START opt-outs)
-├── services/
-│   └── word_of_day_service.py  # Orchestration: generate → validate → send
-├── domain/
-│   ├── validators.py           # Message validation rules
-│   └── fallback.py             # Safe fallback message parameters
-├── integrations/
-│   ├── llm_client.py           # LLM API client (OpenAI-compatible)
-│   └── wasender_client.py      # WaSenderAPI client
-├── logging/
-│   └── audit_log.py            # JSONL audit trail
-├── db/
-│   ├── base.py                 # SQLAlchemy Base and TimestampMixin
-│   ├── session.py              # Database engine and session management
-│   └── models/
-│       └── student.py          # Student ORM model
-└── repositories/
-    └── student.py              # Student CRUD operations
+backend/
+├── app/
+│   ├── main.py                     # CLI entry point (send, preview, health)
+│   ├── config.py                   # Environment variable configuration
+│   ├── api/
+│   │   ├── routes.py               # FastAPI app factory and router registration
+│   │   ├── deps.py                 # Shared FastAPI dependencies (auth, DB, GCP client)
+│   │   ├── schemas.py              # Shared Pydantic request/response models
+│   │   ├── webhook_routes.py       # Webhook handler (STOP/START opt-outs)
+│   │   └── routers/
+│   │       ├── students.py         # Student CRUD endpoints
+│   │       ├── messages.py         # POST /send-word-of-day, GET /preview
+│   │       ├── admin.py            # GET /health, GET /stats, GET /audit-log
+│   │       └── schedule.py         # GET /schedule, PATCH /schedule
+│   ├── services/
+│   │   └── word_of_day_service.py  # Orchestration: generate → validate → send
+│   ├── domain/
+│   │   ├── validators.py           # Message validation rules
+│   │   └── fallback.py             # Safe fallback message parameters
+│   ├── integrations/
+│   │   ├── llm_client.py           # LLM API client (OpenAI-compatible)
+│   │   ├── wasender_client.py      # WaSenderAPI client
+│   │   └── gcp_scheduler.py        # GCP Cloud Scheduler client (get/update job)
+│   ├── logging/
+│   │   └── audit_log.py            # JSONL audit trail
+│   ├── db/
+│   │   ├── base.py                 # SQLAlchemy Base and TimestampMixin
+│   │   ├── session.py              # Database engine and session management
+│   │   └── models/
+│   │       └── student.py          # Student ORM model
+│   └── repositories/
+│       └── student.py              # Student CRUD operations
+├── scripts/
+│   ├── init_db.py                  # Create all database tables
+│   └── manage_students.py          # Student management CLI (add, list, remove, opt-out)
+├── tests/
+│   ├── test_validators.py          # Validation rule tests
+│   ├── test_service_happy_path.py  # Service integration tests
+│   └── test_enrollment.py          # Phone normalization, welcome message, and POST /students tests
+├── Dockerfile
+└── pyproject.toml
 
-scripts/
-├── init_db.py                  # Create all database tables
-└── manage_students.py          # Student management CLI (add, list, remove, opt-out)
-
-tests/
-├── test_validators.py          # Validation rule tests
-├── test_service_happy_path.py  # Service integration tests
-└── test_enrollment.py          # Phone normalization, welcome message, and POST /students tests
+frontend/
+├── src/
+│   ├── api/
+│   │   ├── client.ts               # Base fetch wrapper (attaches X-API-Key, throws on non-2xx)
+│   │   ├── students.ts             # Typed functions for all student endpoints
+│   │   └── schedule.ts             # Typed functions for GET/PATCH /schedule
+│   ├── components/
+│   │   ├── ui/                     # shadcn/ui primitives (Button, Table, Dialog, etc.)
+│   │   ├── LoginScreen.tsx         # API key entry form
+│   │   ├── StudentsTab.tsx         # Student table with search, filter, and CRUD actions
+│   │   ├── ScheduleTab.tsx         # Schedule config form (time, timezone, theme, level)
+│   │   ├── AddStudentDialog.tsx    # Add student form dialog
+│   │   ├── EditStudentDialog.tsx   # Edit student form dialog (pre-filled)
+│   │   └── DeleteConfirmDialog.tsx # Hard-delete confirmation dialog
+│   ├── lib/
+│   │   └── utils.ts                # shadcn/ui utility (cn)
+│   ├── App.tsx                     # Auth gate + tab navigation (Students, Schedule)
+│   ├── main.tsx                    # React Query provider + render
+│   └── index.css                   # Tailwind + shadcn CSS variables
+├── .env.example                    # VITE_API_URL=http://localhost:8000
+├── components.json                 # shadcn/ui config
+├── package.json
+├── tsconfig.json
+└── vite.config.ts
 ```
 
 ---
@@ -857,6 +1194,16 @@ tests/
 - Confirm `WASENDER_WEBHOOK_SECRET` in `.env` matches the secret shown in the WaSenderAPI dashboard exactly
 - If running locally, use [ngrok](https://ngrok.com) to expose your server: `ngrok http 8000`
 - Check your server logs — a `401` response means the signature is not matching
+
+### `GET /schedule` or `PATCH /schedule` returning 503
+
+The schedule endpoints are production-only and require all four GCP env vars to be set: `GCP_PROJECT_ID`, `GCP_LOCATION`, `GCP_SCHEDULER_JOB_ID`, `SERVICE_URL`. Leave them blank in local dev and the 503 is expected.
+
+If the vars are set but you're still getting an error, make sure Application Default Credentials are configured:
+
+```bash
+gcloud auth application-default login
+```
 
 ### API returning 401
 
