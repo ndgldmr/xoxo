@@ -17,6 +17,7 @@ WhatsApp "English Word/Phrase of the Day" service for Brazilian Portuguese speak
 - [Admin Dashboard](#admin-dashboard)
 - [API Reference](#api-reference)
 - [Student Management](#student-management)
+- [Dashboard Stats](#dashboard-stats)
 - [CLI Reference](#cli-reference)
 - [Cron Setup](#cron-setup)
 - [Webhook: Opt-Out / Opt-In](#webhook-opt-out--opt-in)
@@ -44,7 +45,7 @@ WhatsApp "English Word/Phrase of the Day" service for Brazilian Portuguese speak
 - **Audit Logging** — JSONL-based audit trail of every send with full per-student tracking
 - **Dry Run Mode** — Test everything without actually sending messages
 - **CLI & API** — Run via command line or FastAPI HTTP server
-- **Admin Dashboard** — React web UI for managing students (add, deactivate, reactivate, delete)
+- **Admin Dashboard** — React web UI for managing students (add, edit, deactivate, reactivate, delete) and configuring the send schedule
 
 ---
 
@@ -348,6 +349,21 @@ The dashboard has a login screen. Enter your `API_KEY` (the same value as `API_K
 | **Reactivate** | Re-enables a previously deactivated student |
 | **Delete** | Hard-deletes a student after a confirmation dialog |
 | **Show inactive** | Toggle to include/exclude inactive students in the table |
+| **Search** | Filter students by name or phone number |
+| **Level filter** | Filter students by English level |
+
+### Schedule tab
+
+Configure the automated daily send schedule. Changes are applied live to the GCP Cloud Scheduler job.
+
+| Field | Description |
+|---|---|
+| **Send time** | Time of day to send the message (HH:MM) |
+| **Timezone** | IANA timezone for the send time (e.g. `America/Sao_Paulo`) |
+| **Theme** | Topic hint passed to the LLM (e.g. `"travel"`, `"work"`) |
+| **Level** | English level for the generated message (`beginner`, `intermediate`, `advanced`) |
+
+> **Note:** The Schedule tab returns a 503 error in local development unless all four GCP environment variables are configured.
 
 ### Deployment (Vercel)
 
@@ -430,7 +446,7 @@ Generates and sends a Word of the Day message to all active subscribers. **Requi
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `theme` | string | `"daily life"` | Topic theme for the LLM prompt (e.g. `"work"`, `"travel"`, `"food"`) |
-| `level` | string | `"beginner"` | `"beginner"` or `"intermediate"` |
+| `level` | string | `"beginner"` | `"beginner"`, `"intermediate"`, or `"advanced"` |
 | `force` | boolean | `false` | If `true`, sends even if a message was already sent today |
 
 **Response**
@@ -574,6 +590,20 @@ curl "https://your-domain.com/students?include_inactive=true" \
 
 ---
 
+### `GET /students/{phone_number}`
+
+Returns a single student by phone number. **Requires `X-API-Key`.**
+
+Returns `404 Not Found` if the student doesn't exist.
+
+**Example**
+```bash
+curl "https://your-domain.com/students/%2B5511999999999" \
+  -H "X-API-Key: your_api_key"
+```
+
+---
+
 ### `POST /students`
 
 Adds a new student. **Requires `X-API-Key`.**
@@ -594,7 +624,7 @@ Adds a new student. **Requires `X-API-Key`.**
 | `phone_number` | Yes | E.164 format (e.g. `+5511999999999`). Light normalization is applied automatically — formatting characters such as spaces, dashes, parentheses, and dots are stripped, and a leading `+` is added if missing. The result must be `+` followed by 7–15 digits. |
 | `first_name` | No | Student's first name |
 | `last_name` | No | Student's last name |
-| `english_level` | No | `"beginner"` (default) or `"intermediate"` |
+| `english_level` | No | `"beginner"` (default), `"intermediate"`, or `"advanced"` |
 | `whatsapp_messages` | No | `true` (default) — whether to send messages |
 
 Returns `201 Created` with the created student object, or `409 Conflict` if the phone number already exists.
@@ -649,6 +679,34 @@ curl -X PATCH "https://your-domain.com/students/+5511999999999" \
 
 ---
 
+### `POST /students/{phone_number}/deactivate`
+
+Soft-deletes a student — sets `is_active = false` so they no longer receive messages but remain in the database. **Requires `X-API-Key`.**
+
+Returns `200` with the updated student object, or `404 Not Found` if the student doesn't exist.
+
+**Example**
+```bash
+curl -X POST "https://your-domain.com/students/%2B5511999999999/deactivate" \
+  -H "X-API-Key: your_api_key"
+```
+
+---
+
+### `POST /students/{phone_number}/reactivate`
+
+Re-enables a previously deactivated student — sets `is_active = true`. **Requires `X-API-Key`.**
+
+Returns `200` with the updated student object, or `404 Not Found` if the student doesn't exist.
+
+**Example**
+```bash
+curl -X POST "https://your-domain.com/students/%2B5511999999999/reactivate" \
+  -H "X-API-Key: your_api_key"
+```
+
+---
+
 ### `DELETE /students/{phone_number}`
 
 Hard-deletes a student by phone number. **Requires `X-API-Key`.**
@@ -678,6 +736,67 @@ This endpoint should only be called by WaSenderAPI — you do not need to call i
 | `STOP` (exact, case-insensitive) | `whatsapp_messages = false` | PT-BR opt-out confirmation + re-enrol instructions |
 | `START` (exact, case-insensitive) | `whatsapp_messages = true` | PT-BR welcome-back confirmation |
 | Anything else | No change | No reply |
+
+---
+
+### `GET /stats`
+
+Returns aggregate dashboard statistics. **Requires `X-API-Key`.**
+
+**Response**
+```json
+{
+  "total_students": 15,
+  "active_students": 12,
+  "inactive_students": 3,
+  "subscribed_students": 11,
+  "opted_out_students": 1,
+  "sent_today": true,
+  "sends_today": 11
+}
+```
+
+**Example**
+```bash
+curl https://your-domain.com/stats \
+  -H "X-API-Key: your_api_key"
+```
+
+---
+
+### `GET /audit-log`
+
+Returns paginated audit log entries with optional filtering. **Requires `X-API-Key`.**
+
+**Query parameters**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `date_str` | string | — | ISO date string to filter by (e.g. `2026-02-20`) |
+| `phone_number` | string | — | Filter to a specific student's phone number |
+| `limit` | integer | `50` | Maximum entries to return |
+| `offset` | integer | `0` | Number of entries to skip (for pagination) |
+
+**Example**
+```bash
+# All entries for today
+curl "https://your-domain.com/audit-log?date_str=2026-02-20" \
+  -H "X-API-Key: your_api_key"
+
+# A specific student's history
+curl "https://your-domain.com/audit-log?phone_number=%2B5511999999999&limit=10" \
+  -H "X-API-Key: your_api_key"
+```
+
+---
+
+## Dashboard Stats
+
+The `GET /stats` endpoint provides real-time counts used by the admin dashboard:
+
+- **total / active / inactive** — student counts
+- **subscribed / opted_out** — WhatsApp opt-in status counts
+- **sent_today / sends_today** — whether a message was sent today and how many students received it (based on the JSONL audit log)
 
 ---
 
@@ -779,7 +898,7 @@ python -m app.main send --force
 
 **Available themes:** `daily life`, `work`, `travel`, `emotions`, `food`, `shopping`, `health`, `technology`, and more — any topic phrase works.
 
-**Available levels:** `beginner`, `intermediate`
+**Available levels:** `beginner`, `intermediate`, `advanced`
 
 ---
 
@@ -1017,16 +1136,19 @@ frontend/
 ├── src/
 │   ├── api/
 │   │   ├── client.ts               # Base fetch wrapper (attaches X-API-Key, throws on non-2xx)
-│   │   └── students.ts             # Typed functions for all student endpoints
+│   │   ├── students.ts             # Typed functions for all student endpoints
+│   │   └── schedule.ts             # Typed functions for GET/PATCH /schedule
 │   ├── components/
 │   │   ├── ui/                     # shadcn/ui primitives (Button, Table, Dialog, etc.)
 │   │   ├── LoginScreen.tsx         # API key entry form
-│   │   ├── StudentsTab.tsx         # Student table + toolbar
+│   │   ├── StudentsTab.tsx         # Student table with search, filter, and CRUD actions
+│   │   ├── ScheduleTab.tsx         # Schedule config form (time, timezone, theme, level)
 │   │   ├── AddStudentDialog.tsx    # Add student form dialog
+│   │   ├── EditStudentDialog.tsx   # Edit student form dialog (pre-filled)
 │   │   └── DeleteConfirmDialog.tsx # Hard-delete confirmation dialog
 │   ├── lib/
 │   │   └── utils.ts                # shadcn/ui utility (cn)
-│   ├── App.tsx                     # Auth gate — shows LoginScreen or StudentsTab
+│   ├── App.tsx                     # Auth gate + tab navigation (Students, Schedule)
 │   ├── main.tsx                    # React Query provider + render
 │   └── index.css                   # Tailwind + shadcn CSS variables
 ├── .env.example                    # VITE_API_URL=http://localhost:8000
