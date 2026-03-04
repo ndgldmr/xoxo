@@ -588,6 +588,42 @@ curl -X POST https://your-domain.com/broadcast \
 
 ---
 
+### `POST /broadcast`
+
+Sends a custom message to all active, opted-in students. Optionally filters by English level. **Requires `X-API-Key`.**
+
+**Request body**
+```json
+{
+  "message": "Classes are cancelled this Friday. See you next week!",
+  "level": "beginner"
+}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `message` | string | Yes | The message text to send |
+| `level` | string | No | Restrict recipients to `"beginner"`, `"intermediate"`, or `"advanced"`. Omit (or `null`) to send to all levels. |
+
+**Response**
+```json
+{
+  "sent_count": 38,
+  "failed_count": 1,
+  "total_recipients": 39
+}
+```
+
+**Example**
+```bash
+curl -X POST https://your-domain.com/broadcast \
+  -H "X-API-Key: your_api_key" \
+  -H "Content-Type: application/json" \
+  -d '{"message": "No class this Monday!", "level": null}'
+```
+
+---
+
 ### `GET /schedule`
 
 Returns the current schedule config read live from the GCP Cloud Scheduler job. **Requires `X-API-Key`.** Returns `503` if GCP env vars are not set.
