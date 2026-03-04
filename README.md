@@ -37,7 +37,7 @@ WhatsApp "English Word/Phrase of the Day" service for Brazilian Portuguese speak
 - **Multi-Recipient** — Sends to all active students stored in a PostgreSQL database
 - **Strict Validation** — All 6 message fields are validated for format, length, language, and content rules before sending
 - **Auto-Retry with Repair** — If validation fails, automatically retries with a repair prompt (up to 2 retries)
-- **Fallback Safety** — Never crashes — a safe fallback message is always delivered if generation fails
+- **Resilient LLM Pipeline** — On 503 errors, automatically retries the primary model (10s then 30s); if still unavailable, falls back to `gemini-2.0-flash-lite`; if both fail, no message is sent rather than delivering stale content
 - **Welcome Message** — When a student is added with `whatsapp_messages: true`, a Portuguese welcome WhatsApp message is sent to them automatically
 - **Opt-Out / Opt-In** — Students send "STOP" or "START" via WhatsApp; the webhook updates the database and sends a PT-BR confirmation automatically
 - **API Authentication** — All sensitive endpoints require an `X-API-Key` header
@@ -196,6 +196,7 @@ cp .env.example .env
 | `LLM_MODEL` | No | `gpt-4o-mini` | Model name (e.g. `gemini-flash-latest`) |
 | `LLM_BASE_URL` | No | `https://api.openai.com/v1` | LLM API base URL |
 | `LLM_TIMEOUT` | No | `30` | LLM request timeout in seconds |
+| `LLM_FALLBACK_MODEL` | No | `gemini-2.0-flash-lite` | Fallback model tried if primary returns 503 after retries (same API key/URL). Set to empty string to disable. |
 | `WASENDER_API_KEY` | Yes | — | WaSenderAPI bearer token |
 | `WASENDER_WEBHOOK_SECRET` | Yes | — | Webhook secret from WaSenderAPI dashboard |
 | `DATABASE_URL` | Yes | — | PostgreSQL connection string |
@@ -1143,12 +1144,20 @@ All 6 parameters are validated on every send:
 
 ## Retry & Fallback Logic
 
+**LLM availability (503 errors)**
+
+1. Primary model called — if 503, wait 10s and retry
+2. If still 503, wait 30s and retry once more
+3. If still failing, try the fallback model (`LLM_FALLBACK_MODEL`, default `gemini-2.0-flash-lite`) using the same API key
+4. If both models are unavailable, **no message is sent** for that run
+
+**Validation failures**
+
 1. **Attempt 1** — Generate 6 parameters with the LLM
-2. **Validate** — Check all rules above
+2. **Validate** — Check all rules
 3. **Attempt 2** — If invalid, regenerate using a repair prompt that includes the specific validation errors
 4. **Attempt 3** — Retry repair once more if still invalid
-5. **Fallback** — If all 3 attempts fail, use a safe deterministic fallback message ("Hello")
-6. **Always sends** — The job never fails silently; a message is always delivered
+5. If all 3 attempts fail validation, **no message is sent**
 
 ---
 
@@ -1307,7 +1316,7 @@ frontend/
 
 - Run `python -m app.main preview` to inspect the generated content
 - Review `audit_log.jsonl` for the specific validation errors
-- The app will automatically retry and fall back to a safe message — validation failures do not stop the send
+- The app will automatically retry with a repair prompt; if all repair attempts fail, no message is sent for that run
 
 ### Database errors
 

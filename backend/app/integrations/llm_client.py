@@ -1,7 +1,10 @@
 """LLM client for generating Word of the Day messages."""
 import httpx
 import json
+import time
 from typing import Optional
+
+_RETRY_DELAYS = [10, 30]  # seconds to wait before 2nd and 3rd attempts on 503
 
 
 class LLMError(Exception):
@@ -113,74 +116,80 @@ Return ONLY the final message with the exact structure. No extra commentary."""
 
     def _generate_openai(self, prompt: str, temperature: float) -> str:
         """Generate using OpenAI-compatible API."""
-        try:
-            with httpx.Client(timeout=self.timeout) as client:
-                response = client.post(
-                    f"{self.base_url}/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": self.model,
-                        "messages": [
-                            {"role": "user", "content": prompt}
-                        ],
-                        "temperature": temperature,
-                    },
-                )
-                response.raise_for_status()
-
-            data = response.json()
-            message = data["choices"][0]["message"]["content"].strip()
-            return message
-
-        except httpx.TimeoutException as e:
-            raise LLMError(f"Request timed out after {self.timeout}s: {e}")
-        except httpx.HTTPStatusError as e:
-            raise LLMError(f"HTTP error {e.response.status_code}: {e.response.text}")
-        except (KeyError, IndexError) as e:
-            raise LLMError(f"Unexpected API response format: {e}")
-        except Exception as e:
-            raise LLMError(f"LLM API call failed: {e}")
+        for attempt in range(len(_RETRY_DELAYS) + 1):
+            if attempt > 0:
+                wait = _RETRY_DELAYS[attempt - 1]
+                print(f"LLM returned 503, retrying in {wait}s (attempt {attempt + 1}/{len(_RETRY_DELAYS) + 1})...")
+                time.sleep(wait)
+            try:
+                with httpx.Client(timeout=self.timeout) as client:
+                    response = client.post(
+                        f"{self.base_url}/chat/completions",
+                        headers={
+                            "Authorization": f"Bearer {self.api_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json={
+                            "model": self.model,
+                            "messages": [
+                                {"role": "user", "content": prompt}
+                            ],
+                            "temperature": temperature,
+                        },
+                    )
+                    response.raise_for_status()
+                data = response.json()
+                return data["choices"][0]["message"]["content"].strip()
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 503 and attempt < len(_RETRY_DELAYS):
+                    continue
+                raise LLMError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            except httpx.TimeoutException as e:
+                raise LLMError(f"Request timed out after {self.timeout}s: {e}")
+            except (KeyError, IndexError) as e:
+                raise LLMError(f"Unexpected API response format: {e}")
+            except Exception as e:
+                raise LLMError(f"LLM API call failed: {e}")
 
     def _generate_gemini(self, prompt: str, temperature: float) -> str:
         """Generate using Google Gemini API."""
-        try:
-            # Gemini API endpoint
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
-
-            with httpx.Client(timeout=self.timeout) as client:
-                response = client.post(
-                    url,
-                    headers={
-                        "Content-Type": "application/json",
-                        "x-goog-api-key": self.api_key,
-                    },
-                    json={
-                        "contents": [{
-                            "parts": [{"text": prompt}]
-                        }],
-                        "generationConfig": {
-                            "temperature": temperature,
-                            "maxOutputTokens": 2048,
-                        }
-                    },
-                )
-                response.raise_for_status()
-
-            data = response.json()
-            message = data["candidates"][0]["content"]["parts"][0]["text"].strip()
-            return message
-
-        except httpx.TimeoutException as e:
-            raise LLMError(f"Request timed out after {self.timeout}s: {e}")
-        except httpx.HTTPStatusError as e:
-            raise LLMError(f"HTTP error {e.response.status_code}: {e.response.text}")
-        except (KeyError, IndexError) as e:
-            raise LLMError(f"Unexpected Gemini API response format: {e}")
-        except Exception as e:
-            raise LLMError(f"Gemini API call failed: {e}")
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
+        for attempt in range(len(_RETRY_DELAYS) + 1):
+            if attempt > 0:
+                wait = _RETRY_DELAYS[attempt - 1]
+                print(f"LLM returned 503, retrying in {wait}s (attempt {attempt + 1}/{len(_RETRY_DELAYS) + 1})...")
+                time.sleep(wait)
+            try:
+                with httpx.Client(timeout=self.timeout) as client:
+                    response = client.post(
+                        url,
+                        headers={
+                            "Content-Type": "application/json",
+                            "x-goog-api-key": self.api_key,
+                        },
+                        json={
+                            "contents": [{
+                                "parts": [{"text": prompt}]
+                            }],
+                            "generationConfig": {
+                                "temperature": temperature,
+                                "maxOutputTokens": 2048,
+                            }
+                        },
+                    )
+                    response.raise_for_status()
+                data = response.json()
+                return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 503 and attempt < len(_RETRY_DELAYS):
+                    continue
+                raise LLMError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            except httpx.TimeoutException as e:
+                raise LLMError(f"Request timed out after {self.timeout}s: {e}")
+            except (KeyError, IndexError) as e:
+                raise LLMError(f"Unexpected Gemini API response format: {e}")
+            except Exception as e:
+                raise LLMError(f"Gemini API call failed: {e}")
 
     def generate_repair_message(
         self,

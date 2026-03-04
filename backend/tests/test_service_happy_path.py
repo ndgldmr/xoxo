@@ -161,18 +161,18 @@ def test_validation_failure_triggers_retry(service, mock_llm_client, mock_wasend
     assert result["used_fallback"] is False
 
 
-def test_fallback_used_after_max_retries(service, mock_llm_client, mock_wasender_client):
-    """Test that fallback is used after validation fails on all retry attempts."""
-    # All attempts return invalid params
+def test_no_send_after_max_validation_retries(service, mock_llm_client, mock_wasender_client):
+    """Test that nothing is sent when validation keeps failing after all repair attempts."""
     invalid_params = {**VALID_PARAMS, "word_phrase": ""}
     mock_llm_client.generate_message_params.return_value = invalid_params
     mock_llm_client.generate_repair_message_params.return_value = invalid_params
 
     result = service.run_daily_job()
 
-    # Should use fallback
-    assert result["sent_count"] == 1
-    assert result["used_fallback"] is True
+    assert result["status"] == "error"
+    assert result["sent_count"] == 0
+    assert result["used_fallback"] is False
+    mock_wasender_client.send_template_message.assert_not_called()
 
 
 def test_multi_recipient_generates_content_per_level(
@@ -263,3 +263,62 @@ def test_preview_generates_and_validates_without_sending(
     # No audit log entries for preview
     events = service.audit_log.get_today_events()
     assert len(events) == 0
+
+
+def test_fallback_llm_used_when_primary_fails(
+    mock_wasender_client, temp_audit_log
+):
+    """Test that fallback LLM is tried when primary raises LLMError."""
+    from app.integrations.llm_client import LLMError
+
+    primary = Mock()
+    primary.generate_message_params.side_effect = LLMError("503 unavailable")
+
+    fallback = Mock()
+    fallback.model = "gemini-2.0-flash-lite"
+    fallback.generate_message_params.return_value = VALID_PARAMS
+
+    svc = WordOfDayService(
+        llm_client=primary,
+        fallback_llm_client=fallback,
+        whatsapp_client=mock_wasender_client,
+        audit_log=temp_audit_log,
+        to_number="+5511999999999",
+    )
+    result = svc.run_daily_job()
+
+    assert result["status"] == "success"
+    assert result["sent_count"] == 1
+    assert result["used_fallback"] is False  # LLM fallback ≠ hardcoded fallback
+    primary.generate_message_params.assert_called_once()
+    fallback.generate_message_params.assert_called_once()
+
+
+def test_no_send_when_both_llms_fail(
+    mock_wasender_client, temp_audit_log
+):
+    """Test that nothing is sent when both primary and fallback LLMs are unavailable."""
+    from app.integrations.llm_client import LLMError
+
+    primary = Mock()
+    primary.generate_message_params.side_effect = LLMError("503 unavailable")
+
+    fallback = Mock()
+    fallback.model = "gemini-2.0-flash-lite"
+    fallback.generate_message_params.side_effect = LLMError("503 unavailable")
+
+    svc = WordOfDayService(
+        llm_client=primary,
+        fallback_llm_client=fallback,
+        whatsapp_client=mock_wasender_client,
+        audit_log=temp_audit_log,
+        to_number="+5511999999999",
+    )
+    result = svc.run_daily_job()
+
+    assert result["status"] == "error"
+    assert result["sent_count"] == 0
+    assert result["used_fallback"] is False
+    mock_wasender_client.send_template_message.assert_not_called()
+    primary.generate_message_params.assert_called_once()
+    fallback.generate_message_params.assert_called_once()

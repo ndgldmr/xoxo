@@ -10,6 +10,9 @@ class Settings(BaseSettings):
     llm_model: str = "gpt-4o-mini"
     llm_base_url: str = "https://api.openai.com/v1"
     llm_timeout: int = 30
+    # Fallback model used when primary LLM is unavailable (same API key/base URL).
+    # Set to empty string to disable the fallback LLM and go straight to hardcoded content.
+    llm_fallback_model: str = "gemini-2.0-flash-lite"
 
     # WaSenderAPI Configuration
     wasender_api_key: str = ""
