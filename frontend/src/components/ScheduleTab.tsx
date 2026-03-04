@@ -12,8 +12,6 @@ import {
 } from "@/components/ui/select"
 import { getSchedule, updateSchedule, type ScheduleConfig } from "@/api/schedule"
 
-const LEVELS = ["beginner", "intermediate", "advanced"]
-
 const TIMEZONES = [
   "America/Sao_Paulo",
   "America/New_York",
@@ -57,7 +55,6 @@ export function ScheduleTab() {
     // Only send fields that changed
     const diff: Partial<ScheduleConfig> = {}
     if (form.theme !== data.theme) diff.theme = form.theme
-    if (form.level !== data.level) diff.level = form.level
     if (form.send_time !== data.send_time) diff.send_time = form.send_time
     if (form.timezone !== data.timezone) diff.timezone = form.timezone
     if (Object.keys(diff).length === 0) return
@@ -71,7 +68,6 @@ export function ScheduleTab() {
 
   const isDirty = data && form && (
     form.theme !== data.theme ||
-    form.level !== data.level ||
     form.send_time !== data.send_time ||
     form.timezone !== data.timezone
   )
@@ -130,22 +126,6 @@ export function ScheduleTab() {
           required
         />
         <p className="text-xs text-muted-foreground">Topic passed to the LLM when generating the daily message.</p>
-      </div>
-
-      <div className="space-y-1.5">
-        <Label htmlFor="level">Level</Label>
-        <Select value={form.level} onValueChange={(v) => set("level", v)}>
-          <SelectTrigger id="level">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {LEVELS.map((l) => (
-              <SelectItem key={l} value={l}>
-                {l.charAt(0).toUpperCase() + l.slice(1)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
       </div>
 
       {mutation.isError && (

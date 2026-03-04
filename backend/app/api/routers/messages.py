@@ -21,7 +21,6 @@ async def send_word_of_day(request: SendRequest) -> SendResponse:
     try:
         result = service.run_daily_job(
             theme=request.theme,
-            level=request.level,
             force=request.force,
         )
         return SendResponse(**result)

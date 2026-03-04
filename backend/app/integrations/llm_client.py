@@ -333,29 +333,23 @@ Return ONLY the JSON object, no extra commentary or markdown formatting."""
         errors_text = "\n".join(f"- {err}" for err in validation_errors)
         prev_json = json.dumps(previous_output, indent=2, ensure_ascii=False)
 
-        repair_prompt = f"""Your previous output failed validation for these reasons:
+        repair_prompt = f"""Fix the following JSON so it passes all validation rules.
+
+Validation errors to fix:
 {errors_text}
 
 Previous output:
 {prev_json}
 
-{self.TEMPLATE_PARAMS_PROMPT}
+Rules:
+- Output ONLY a valid JSON object with exactly these 6 keys: word_phrase, meaning_pt, pronunciation, when_to_use, example_pt, example_en
+- word_phrase: English only, max 40 characters
+- pronunciation: max 40 characters
+- meaning_pt, when_to_use, example_pt: Brazilian Portuguese, use accented characters (ã, ç, é, etc.)
+- example_en: English only, max 120 characters
+- No markdown, no emojis, no URLs
 
-Requirements:
-- word_phrase: single line, max 40 characters, in English
-- pronunciation: single line, max 40 characters
-- meaning_pt: in Brazilian Portuguese, max 300 characters
-- when_to_use: in Brazilian Portuguese, max 300 characters
-- example_pt: in Brazilian Portuguese, max 180 characters
-- example_en: in English, max 120 characters
-- Portuguese text should use common PT-BR words or accented characters
-- No URLs, no markdown, no emojis, no special formatting
-- Portuguese and English examples must be separate, not combined
-
-Theme: {theme}
-Level: {level}
-
-Return ONLY the corrected JSON object, no extra commentary."""
+Theme: {theme}, Level: {level}"""
 
         if self.is_gemini:
             response_text = self._generate_gemini(repair_prompt, temperature=0.5)

@@ -10,7 +10,6 @@ from app.integrations.gcp_scheduler import GCPSchedulerClient, GCPSchedulerError
 
 router = APIRouter(tags=["schedule"], dependencies=[Depends(verify_api_key)])
 
-_VALID_LEVELS = {"beginner", "intermediate", "advanced"}
 _TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 
@@ -38,11 +37,6 @@ async def update_schedule(
             status_code=422,
             detail="send_time must match HH:MM (e.g. '09:00')",
         )
-    if body.level is not None and body.level not in _VALID_LEVELS:
-        raise HTTPException(
-            status_code=422,
-            detail=f"level must be one of: {', '.join(sorted(_VALID_LEVELS))}",
-        )
 
     # Fetch current config to fill in unset fields
     try:
@@ -53,7 +47,6 @@ async def update_schedule(
     # Merge: only override fields that were explicitly provided
     merged = {
         "theme": body.theme if body.theme is not None else current["theme"],
-        "level": body.level if body.level is not None else current["level"],
         "send_time": body.send_time if body.send_time is not None else current["send_time"],
         "timezone": body.timezone if body.timezone is not None else current["timezone"],
     }

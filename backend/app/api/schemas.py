@@ -52,7 +52,6 @@ class StudentResponse(BaseModel):
 class SendRequest(BaseModel):
     """Request body for the send-word-of-day endpoint."""
     theme: str = Field(default="daily life", description="Topic theme for message")
-    level: str = Field(default="beginner", description="Difficulty level (beginner/intermediate)")
     force: bool = Field(default=False, description="Send even if already sent today")
 
 
@@ -98,7 +97,6 @@ class BroadcastResponse(BaseModel):
 class ScheduleConfigUpdate(BaseModel):
     """Request body for PATCH /schedule — all fields optional."""
     theme: Optional[str] = None
-    level: Optional[str] = None       # "beginner" | "intermediate" | "advanced"
     send_time: Optional[str] = None   # "HH:MM" validated in the router
     timezone: Optional[str] = None    # IANA string e.g. "America/Sao_Paulo"
 
@@ -106,7 +104,6 @@ class ScheduleConfigUpdate(BaseModel):
 class ScheduleConfigResponse(BaseModel):
     """Response model for schedule endpoints."""
     theme: str
-    level: str
     send_time: str   # HH:MM
     timezone: str
 

@@ -175,6 +175,69 @@ def test_fallback_used_after_max_retries(service, mock_llm_client, mock_wasender
     assert result["used_fallback"] is True
 
 
+def test_multi_recipient_generates_content_per_level(
+    mock_llm_client,
+    mock_wasender_client,
+    temp_audit_log,
+):
+    """In multi-recipient mode, content is generated separately for each english level."""
+    from unittest.mock import MagicMock
+
+    beginner_params = {**VALID_PARAMS, "word_phrase": "Good morning"}
+    intermediate_params = {**VALID_PARAMS, "word_phrase": "Nevertheless"}
+
+    def generate_by_level(theme, level):
+        return beginner_params if level == "beginner" else intermediate_params
+
+    mock_llm_client.generate_message_params.side_effect = generate_by_level
+
+    # Build mock DB session with two students at different levels
+    beginner = MagicMock()
+    beginner.phone_number = "+5511111111111"
+    beginner.first_name = "Ana"
+    beginner.english_level = "beginner"
+
+    intermediate = MagicMock()
+    intermediate.phone_number = "+5522222222222"
+    intermediate.first_name = "Bruno"
+    intermediate.english_level = "intermediate"
+
+    mock_repo = MagicMock()
+    mock_repo.get_active_subscribers.return_value = [beginner, intermediate]
+
+    mock_db = MagicMock()
+
+    with __import__("unittest.mock", fromlist=["patch"]).patch(
+        "app.repositories.student.StudentRepository", return_value=mock_repo
+    ):
+        svc = WordOfDayService(
+            llm_client=mock_llm_client,
+            whatsapp_client=mock_wasender_client,
+            audit_log=temp_audit_log,
+            db_session=mock_db,
+        )
+        result = svc.run_daily_job(theme="travel")
+
+    assert result["status"] == "success"
+    assert result["sent_count"] == 2
+    assert result["total_recipients"] == 2
+
+    # LLM called once per distinct level
+    assert mock_llm_client.generate_message_params.call_count == 2
+    levels_called = {
+        call.kwargs["level"]
+        for call in mock_llm_client.generate_message_params.call_args_list
+    }
+    assert levels_called == {"beginner", "intermediate"}
+
+    # Both students received a message
+    assert mock_wasender_client.send_template_message.call_count == 2
+
+    # Preview contains both level words
+    assert "beginner" in result["preview"]
+    assert "intermediate" in result["preview"]
+
+
 def test_preview_generates_and_validates_without_sending(
     service,
     mock_llm_client,

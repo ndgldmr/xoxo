@@ -90,7 +90,7 @@ WhatsApp "English Word/Phrase of the Day" service for Brazilian Portuguese speak
 
 **Daily Send**
 ```
-Trigger: CLI (send) or API (POST /send-word-of-day)
+Trigger: API (POST /send-word-of-day) or GCP Cloud Scheduler
                        │
                        ▼
          Already sent today? ──Yes──► Skip (unless force=true)
@@ -99,17 +99,22 @@ Trigger: CLI (send) or API (POST /send-word-of-day)
          Fetch active subscribers from DB
                        │
                        ▼
-            Generate 6 params via LLM
+         Group students by english_level
                        │
-                       ▼
-                 Validate params
-                  │         │
-                Pass       Fail
-                  │         │
-                  │    Repair prompt + retry (up to 2×)
-                  │         │
-                  │        Fail → Use fallback content
-                  └────┬────┘
+          ┌────────────┼────────────┐
+       beginner  intermediate   advanced
+          │            │            │
+          ▼            ▼            ▼
+      Generate      Generate     Generate
+      params        params       params
+      via LLM       via LLM      via LLM
+          │            │            │
+          ▼            ▼            ▼
+       Validate     Validate     Validate
+       (retry/      (retry/      (retry/
+       fallback)    fallback)    fallback)
+          │            │            │
+          └────────────┼────────────┘
                        │
                 ┌──────▼───────┐
                 │ For each     │
@@ -363,7 +368,6 @@ Configure the automated daily send schedule. Changes are applied live to the GCP
 | **Send time** | Time of day to send the message (HH:MM) |
 | **Timezone** | IANA timezone for the send time (e.g. `America/Sao_Paulo`) |
 | **Theme** | Topic hint passed to the LLM (e.g. `"travel"`, `"work"`) |
-| **Level** | English level for the generated message (`beginner`, `intermediate`, `advanced`) |
 
 > **Note:** The Schedule tab returns a 503 error in local development unless all four GCP environment variables are configured.
 
@@ -488,7 +492,6 @@ Generates and sends a Word of the Day message to all active subscribers. **Requi
 ```json
 {
   "theme": "daily life",
-  "level": "beginner",
   "force": false
 }
 ```
@@ -496,8 +499,9 @@ Generates and sends a Word of the Day message to all active subscribers. **Requi
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `theme` | string | `"daily life"` | Topic theme for the LLM prompt (e.g. `"work"`, `"travel"`, `"food"`) |
-| `level` | string | `"beginner"` | `"beginner"`, `"intermediate"`, or `"advanced"` |
 | `force` | boolean | `false` | If `true`, sends even if a message was already sent today |
+
+In multi-recipient mode (database configured), students are automatically grouped by their `english_level` and separate level-appropriate content is generated for each group. The LLM is called once per distinct level present in the active subscriber list.
 
 **Response**
 ```json
@@ -509,7 +513,7 @@ Generates and sends a Word of the Day message to all active subscribers. **Requi
   "date": "2026-02-20",
   "used_fallback": false,
   "validation_errors": [],
-  "preview": "Word: Have breakfast",
+  "preview": "beginner: Have breakfast | intermediate: Buyer's remorse",
   "sends": [
     {
       "phone_number": "+5511999999999",
@@ -543,7 +547,43 @@ Generates and sends a Word of the Day message to all active subscribers. **Requi
 curl -X POST https://your-domain.com/send-word-of-day \
   -H "X-API-Key: your_api_key" \
   -H "Content-Type: application/json" \
-  -d '{"theme": "work", "level": "intermediate", "force": false}'
+  -d '{"theme": "work", "force": false}'
+```
+
+---
+
+### `POST /broadcast`
+
+Sends a custom message to all active, opted-in students. Optionally filters by English level. **Requires `X-API-Key`.**
+
+**Request body**
+```json
+{
+  "message": "Classes are cancelled this Friday. See you next week!",
+  "level": "beginner"
+}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `message` | string | Yes | The message text to send |
+| `level` | string | No | Restrict recipients to `"beginner"`, `"intermediate"`, or `"advanced"`. Omit (or `null`) to send to all levels. |
+
+**Response**
+```json
+{
+  "sent_count": 38,
+  "failed_count": 1,
+  "total_recipients": 39
+}
+```
+
+**Example**
+```bash
+curl -X POST https://your-domain.com/broadcast \
+  -H "X-API-Key: your_api_key" \
+  -H "Content-Type: application/json" \
+  -d '{"message": "No class this Monday!", "level": null}'
 ```
 
 ---
@@ -592,7 +632,6 @@ Returns the current schedule config read live from the GCP Cloud Scheduler job. 
 ```json
 {
   "theme": "daily life",
-  "level": "beginner",
   "send_time": "08:00",
   "timezone": "America/Sao_Paulo"
 }
@@ -614,7 +653,6 @@ Updates the schedule config in the GCP Cloud Scheduler job. All fields are optio
 ```json
 {
   "theme": "travel",
-  "level": "intermediate",
   "send_time": "09:00",
   "timezone": "America/Sao_Paulo"
 }
@@ -623,7 +661,6 @@ Updates the schedule config in the GCP Cloud Scheduler job. All fields are optio
 | Field | Type | Validation |
 |---|---|---|
 | `theme` | string | Any non-empty string |
-| `level` | string | `"beginner"`, `"intermediate"`, or `"advanced"` |
 | `send_time` | string | `HH:MM` format (e.g. `"09:00"`) |
 | `timezone` | string | IANA timezone string (e.g. `"America/Sao_Paulo"`) |
 

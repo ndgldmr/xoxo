@@ -2,7 +2,6 @@ import { apiFetch } from "./client"
 
 export interface ScheduleConfig {
   theme: string
-  level: string
   send_time: string   // "HH:MM"
   timezone: string    // IANA timezone string
 }
