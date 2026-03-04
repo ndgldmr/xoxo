@@ -2,13 +2,15 @@ import { useState } from "react"
 import { LoginScreen } from "./components/LoginScreen"
 import { StudentsTab } from "./components/StudentsTab"
 import { ScheduleTab } from "./components/ScheduleTab"
+import { AnnouncementTab } from "./components/AnnouncementTab"
 import { Button } from "@/components/ui/button"
 
-type Tab = "students" | "schedule"
+type Tab = "students" | "schedule" | "announcement"
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "students", label: "Students" },
   { id: "schedule", label: "Schedule" },
+  { id: "announcement", label: "Send Announcement" },
 ]
 
 function hasStoredKey() {
@@ -66,6 +68,7 @@ export default function App() {
       <main className="mx-auto max-w-6xl px-6 py-6">
         {activeTab === "students" && <StudentsTab />}
         {activeTab === "schedule" && <ScheduleTab />}
+        {activeTab === "announcement" && <AnnouncementTab />}
       </main>
     </div>
   )

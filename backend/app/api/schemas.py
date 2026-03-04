@@ -78,6 +78,19 @@ class PreviewResponse(BaseModel):
     validation_errors: List[str]
 
 
+class BroadcastRequest(BaseModel):
+    """Request body for the broadcast endpoint."""
+    message: str = Field(..., min_length=1, description="Message to send to all active subscribers")
+    level: Optional[str] = Field(None, description="Filter by English level (beginner/intermediate/advanced). Omit to send to all.")
+
+
+class BroadcastResponse(BaseModel):
+    """Response model for the broadcast endpoint."""
+    sent_count: int
+    failed_count: int
+    total_recipients: int
+
+
 # ---------------------------------------------------------------------------
 # Schedule schemas
 # ---------------------------------------------------------------------------

@@ -15,6 +15,7 @@ WhatsApp "English Word/Phrase of the Day" service for Brazilian Portuguese speak
 - [WaSenderAPI Setup](#wasenderapi-setup)
 - [Running the Server](#running-the-server)
 - [Admin Dashboard](#admin-dashboard)
+- [Deploying to GCP](#deploying-to-gcp)
 - [API Reference](#api-reference)
 - [Student Management](#student-management)
 - [Dashboard Stats](#dashboard-stats)
@@ -45,7 +46,8 @@ WhatsApp "English Word/Phrase of the Day" service for Brazilian Portuguese speak
 - **Audit Logging** — JSONL-based audit trail of every send with full per-student tracking
 - **Dry Run Mode** — Test everything without actually sending messages
 - **CLI & API** — Run via command line or FastAPI HTTP server
-- **Admin Dashboard** — React web UI for managing students (add, edit, deactivate, reactivate, delete) and configuring the send schedule
+- **Admin Dashboard** — React web UI for managing students (add, edit, deactivate, reactivate, delete), configuring the send schedule, and broadcasting announcements
+- **Announcements** — Admins can send a custom WhatsApp message to all active students at once, with optional filtering by English level
 
 ---
 
@@ -365,12 +367,60 @@ Configure the automated daily send schedule. Changes are applied live to the GCP
 
 > **Note:** The Schedule tab returns a 503 error in local development unless all four GCP environment variables are configured.
 
-### Deployment (Vercel)
+### Send Announcement tab
+
+Send a one-off custom WhatsApp message to all active, opted-in students.
+
+| Field | Description |
+|---|---|
+| **Recipients** | Filter by English level (`All levels`, `Beginner`, `Intermediate`, `Advanced`) |
+| **Message** | The message text to send |
+
+Only students who are active (`is_active = true`) and have not opted out (`whatsapp_messages = true`) will receive the message. After sending, the tab shows how many students the message was delivered to.
+
+### Frontend deployment (Vercel)
 
 1. Push the repo to GitHub
 2. Create a new Vercel project pointed at the `frontend/` directory
 3. Set `VITE_API_URL` in Vercel's Environment Variables to your Cloud Run URL (e.g. `https://xoxo-....run.app`)
 4. Add the Vercel deployment URL to `ALLOWED_ORIGINS` in the backend `.env` (or Cloud Run environment variables)
+
+---
+
+## Deploying to GCP
+
+The `deploy.sh` script in the repo root handles the full backend deployment in one command. It requires only the `gcloud` CLI — no Docker needed, since builds run remotely via Cloud Build.
+
+### Prerequisites
+
+- `gcloud` CLI installed and authenticated (`gcloud auth login`)
+- Active GCP project set (`gcloud config set project YOUR_PROJECT_ID`)
+- `backend/.env` populated with all production values
+- `python3` available (used to parse `.env` into Cloud Run's env vars format)
+
+### What the script does
+
+| Step | Action |
+|---|---|
+| 1 | Enables `run`, `cloudbuild`, `cloudscheduler`, and `artifactregistry` GCP APIs |
+| 2 | Creates the Artifact Registry Docker repository if it doesn't exist |
+| 3 | Builds and pushes the Docker image via Cloud Build (runs remotely, `linux/amd64`) |
+| 4 | Deploys the new image to Cloud Run with all env vars from `backend/.env` |
+| 5 | Creates or updates the Cloud Scheduler job (`xoxo-daily-send`) |
+
+> **Note:** `DRY_RUN` is always forced to `false` in the deployed service, regardless of what is set in `backend/.env`. The Scheduler job's cron schedule and timezone are **not** overwritten on re-deploys — manage those via the Schedule tab in the admin UI.
+
+### Usage
+
+```bash
+./deploy.sh
+```
+
+To override the GCP project without changing your active `gcloud` config:
+
+```bash
+GCP_PROJECT_ID=my-other-project ./deploy.sh
+```
 
 ---
 
@@ -494,6 +544,42 @@ curl -X POST https://your-domain.com/send-word-of-day \
   -H "X-API-Key: your_api_key" \
   -H "Content-Type: application/json" \
   -d '{"theme": "work", "level": "intermediate", "force": false}'
+```
+
+---
+
+### `POST /broadcast`
+
+Sends a custom message to all active, opted-in students. Optionally filters by English level. **Requires `X-API-Key`.**
+
+**Request body**
+```json
+{
+  "message": "Classes are cancelled this Friday. See you next week!",
+  "level": "beginner"
+}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `message` | string | Yes | The message text to send |
+| `level` | string | No | Restrict recipients to `"beginner"`, `"intermediate"`, or `"advanced"`. Omit (or `null`) to send to all levels. |
+
+**Response**
+```json
+{
+  "sent_count": 38,
+  "failed_count": 1,
+  "total_recipients": 39
+}
+```
+
+**Example**
+```bash
+curl -X POST https://your-domain.com/broadcast \
+  -H "X-API-Key: your_api_key" \
+  -H "Content-Type: application/json" \
+  -d '{"message": "No class this Monday!", "level": null}'
 ```
 
 ---
@@ -1101,7 +1187,7 @@ backend/
 │   │   ├── webhook_routes.py       # Webhook handler (STOP/START opt-outs)
 │   │   └── routers/
 │   │       ├── students.py         # Student CRUD endpoints
-│   │       ├── messages.py         # POST /send-word-of-day, GET /preview
+│   │       ├── messages.py         # POST /send-word-of-day, POST /broadcast, GET /preview
 │   │       ├── admin.py            # GET /health, GET /stats, GET /audit-log
 │   │       └── schedule.py         # GET /schedule, PATCH /schedule
 │   ├── services/
@@ -1125,10 +1211,12 @@ backend/
 ├── scripts/
 │   ├── init_db.py                  # Create all database tables
 │   └── manage_students.py          # Student management CLI (add, list, remove, opt-out)
+├── deploy.sh                       # One-command GCP deployment (Cloud Build + Cloud Run + Scheduler)
 ├── tests/
 │   ├── test_validators.py          # Validation rule tests
 │   ├── test_service_happy_path.py  # Service integration tests
-│   └── test_enrollment.py          # Phone normalization, welcome message, and POST /students tests
+│   ├── test_enrollment.py          # Phone normalization, welcome message, and POST /students tests
+│   └── test_broadcast.py           # POST /broadcast endpoint tests
 ├── Dockerfile
 └── pyproject.toml
 
@@ -1137,18 +1225,20 @@ frontend/
 │   ├── api/
 │   │   ├── client.ts               # Base fetch wrapper (attaches X-API-Key, throws on non-2xx)
 │   │   ├── students.ts             # Typed functions for all student endpoints
-│   │   └── schedule.ts             # Typed functions for GET/PATCH /schedule
+│   │   ├── schedule.ts             # Typed functions for GET/PATCH /schedule
+│   │   └── messages.ts             # Typed functions for POST /broadcast
 │   ├── components/
 │   │   ├── ui/                     # shadcn/ui primitives (Button, Table, Dialog, etc.)
 │   │   ├── LoginScreen.tsx         # API key entry form
 │   │   ├── StudentsTab.tsx         # Student table with search, filter, and CRUD actions
 │   │   ├── ScheduleTab.tsx         # Schedule config form (time, timezone, theme, level)
+│   │   ├── AnnouncementTab.tsx     # Broadcast message form (message, level filter)
 │   │   ├── AddStudentDialog.tsx    # Add student form dialog
 │   │   ├── EditStudentDialog.tsx   # Edit student form dialog (pre-filled)
 │   │   └── DeleteConfirmDialog.tsx # Hard-delete confirmation dialog
 │   ├── lib/
 │   │   └── utils.ts                # shadcn/ui utility (cn)
-│   ├── App.tsx                     # Auth gate + tab navigation (Students, Schedule)
+│   ├── App.tsx                     # Auth gate + tab navigation (Students, Schedule, Send Announcement)
 │   ├── main.tsx                    # React Query provider + render
 │   └── index.css                   # Tailwind + shadcn CSS variables
 ├── .env.example                    # VITE_API_URL=http://localhost:8000
