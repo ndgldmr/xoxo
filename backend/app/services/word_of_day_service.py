@@ -4,7 +4,6 @@ from typing import Dict, List, Optional
 from sqlalchemy.orm import Session
 
 from app.domain.validators import validate_template_params, ValidationError
-from app.domain.fallback import get_fallback_template_params
 from app.integrations.llm_client import LLMClient, LLMError
 from app.integrations.wasender_client import WaSenderClient, WhatsAppError
 from app.logging.audit_log import AuditLog
@@ -21,6 +20,7 @@ class WordOfDayService:
         db_session: Optional[Session] = None,
         to_number: Optional[str] = None,
         send_delay: float = 0.5,
+        fallback_llm_client: Optional[LLMClient] = None,
     ):
         """
         Initialize service.
@@ -38,6 +38,7 @@ class WordOfDayService:
             send_delay: Seconds to wait between sends in multi-recipient mode
         """
         self.llm_client = llm_client
+        self.fallback_llm_client = fallback_llm_client
         self.whatsapp_client = whatsapp_client
         self.audit_log = audit_log
         self.db_session = db_session
@@ -111,6 +112,18 @@ class WordOfDayService:
         params, validation_errors, used_fallback = self._generate_and_validate(
             theme=theme, level=level
         )
+        if params is None:
+            return {
+                "status": "error",
+                "sent_count": 0,
+                "failed_count": 1,
+                "total_recipients": 1,
+                "date": date.today().isoformat(),
+                "used_fallback": False,
+                "validation_errors": validation_errors,
+                "preview": None,
+                "sends": [],
+            }
         send_result = self._send_to_recipient(
             recipient=recipients[0],
             params=params,
@@ -156,6 +169,20 @@ class WordOfDayService:
             )
             any_fallback = any_fallback or used_fallback
             all_validation_errors.extend(validation_errors)
+
+            if params is None:
+                for recipient in group:
+                    sends.append({
+                        "phone_number": recipient["phone_number"],
+                        "student_id": recipient.get("student_id"),
+                        "first_name": recipient.get("first_name"),
+                        "sent": False,
+                        "provider_message_id": None,
+                        "error_message": validation_errors[0] if validation_errors else "LLM unavailable",
+                    })
+                    failed_count += 1
+                continue
+
             previews.append(f"{lvl}: {params.get('word_phrase', 'N/A')}")
 
             for recipient in group:
@@ -200,44 +227,47 @@ class WordOfDayService:
         self, theme: str, level: str
     ) -> tuple[dict, List[str], bool]:
         """
-        Generate and validate 6 template parameters with LLM retry logic.
+        Generate and validate 6 template parameters.
+
+        Attempt order:
+          1. Primary LLM (with built-in 503 retries)
+          2. Fallback LLM if primary raises LLMError (e.g. still unavailable after retries)
+          3. Hardcoded fallback content
+
+        After obtaining params from any LLM, validation failures trigger up to
+        two repair attempts using whichever client succeeded.
 
         Returns:
             (params dict, validation_errors list, used_fallback bool)
         """
+        # Step 1: get initial params from primary LLM
         params = None
-        validation_errors = []
-        used_fallback = False
-        valid = False
+        active_client = None
+        try:
+            params = self.llm_client.generate_message_params(theme=theme, level=level)
+            active_client = self.llm_client
+        except LLMError as e:
+            print(f"LLM generation failed: {e}")
+            if self.fallback_llm_client:
+                print(f"Trying fallback model ({self.fallback_llm_client.model})...")
+                try:
+                    params = self.fallback_llm_client.generate_message_params(
+                        theme=theme, level=level
+                    )
+                    active_client = self.fallback_llm_client
+                except LLMError as e2:
+                    print(f"Fallback LLM also failed: {e2}")
 
+        if params is None:
+            return None, ["LLM unavailable — message not sent"], False
+
+        # Step 2: validate and repair (up to 2 repair attempts)
         max_retries = 2
+        validation_errors = []
         for attempt in range(max_retries + 1):
             try:
-                if attempt == 0:
-                    try:
-                        params = self.llm_client.generate_message_params(
-                            theme=theme, level=level
-                        )
-                    except LLMError as e:
-                        print(f"LLM generation failed: {e}")
-                        params = None
-                        break
-                else:
-                    try:
-                        params = self.llm_client.generate_repair_message_params(
-                            previous_output=params,
-                            validation_errors=validation_errors,
-                            theme=theme,
-                            level=level,
-                        )
-                    except LLMError as e:
-                        print(f"LLM repair failed on attempt {attempt}: {e}")
-                        continue
-
-                valid, _ = validate_template_params(params)
-                validation_errors = []
-                break
-
+                validate_template_params(params)
+                return params, [], False
             except ValidationError as e:
                 validation_errors = e.errors
                 print(
@@ -245,14 +275,18 @@ class WordOfDayService:
                 )
                 if attempt >= max_retries:
                     break
+                try:
+                    params = active_client.generate_repair_message_params(
+                        previous_output=params,
+                        validation_errors=validation_errors,
+                        theme=theme,
+                        level=level,
+                    )
+                except LLMError as e:
+                    print(f"LLM repair failed on attempt {attempt + 1}: {e}")
+                    break
 
-        if not valid or params is None:
-            print("Using fallback content")
-            params = get_fallback_template_params()
-            used_fallback = True
-            validation_errors = []
-
-        return params, validation_errors, used_fallback
+        return None, validation_errors, False
 
     def _get_recipients(self) -> List[Dict]:
         """Return a list of recipient dicts with phone_number, first_name, english_level."""

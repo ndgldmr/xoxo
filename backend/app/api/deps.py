@@ -1,7 +1,7 @@
 """Shared FastAPI dependencies."""
 import re
 import logging
-from typing import Generator
+from typing import Generator, Optional
 
 from fastapi import HTTPException, Security
 from fastapi.security import APIKeyHeader
@@ -61,6 +61,18 @@ def get_audit_log() -> AuditLog:
     return AuditLog(log_path=settings.audit_log_path)
 
 
+def _make_fallback_llm_client(settings) -> Optional[LLMClient]:
+    """Return a fallback LLMClient using the same API key but a lighter model, or None if disabled."""
+    if not settings.llm_fallback_model:
+        return None
+    return LLMClient(
+        api_key=settings.llm_api_key,
+        model=settings.llm_fallback_model,
+        base_url=settings.llm_base_url,
+        timeout=settings.llm_timeout,
+    )
+
+
 def get_service() -> WordOfDayService:
     """Create a WordOfDayService for sending to all active subscribers."""
     settings = get_settings()
@@ -84,6 +96,7 @@ def get_service() -> WordOfDayService:
 
     return WordOfDayService(
         llm_client=llm_client,
+        fallback_llm_client=_make_fallback_llm_client(settings),
         whatsapp_client=whatsapp_client,
         audit_log=audit_log,
         db_session=db_session,
@@ -135,6 +148,7 @@ def get_preview_service() -> WordOfDayService:
 
     return WordOfDayService(
         llm_client=llm_client,
+        fallback_llm_client=_make_fallback_llm_client(settings),
         whatsapp_client=whatsapp_client,
         audit_log=audit_log,
         to_number="+10000000000",  # dummy — preview never sends
