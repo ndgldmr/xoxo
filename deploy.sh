@@ -179,7 +179,7 @@ API_KEY=$(grep '^API_KEY=' "$ENV_FILE" | head -1 | cut -d= -f2- | tr -d '"' | tr
 
 JOB_ID="xoxo-daily-send"
 JOB_URI="${SERVICE_URL}/send-word-of-day"
-JOB_BODY='{"theme":"daily life","level":"beginner","force":false}'
+JOB_BODY='{"theme":"daily life","force":false}'
 JOB_HEADERS="Content-Type=application/json,X-API-Key=${API_KEY}"
 
 if gcloud scheduler jobs describe "$JOB_ID" \

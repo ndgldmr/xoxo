@@ -63,7 +63,6 @@ class GCPSchedulerClient:
 
         return {
             "theme": body.get("theme", ""),
-            "level": body.get("level", ""),
             "send_time": send_time,
             "timezone": job.time_zone,
         }
@@ -71,7 +70,6 @@ class GCPSchedulerClient:
     def update_job(
         self,
         theme: str,
-        level: str,
         send_time: str,
         timezone: str,
     ) -> None:
@@ -79,7 +77,6 @@ class GCPSchedulerClient:
 
         Args:
             theme: topic string
-            level: "beginner" | "intermediate" | "advanced"
             send_time: "HH:MM"
             timezone: IANA timezone string e.g. "America/Sao_Paulo"
 
@@ -87,7 +84,7 @@ class GCPSchedulerClient:
             GCPSchedulerError: if the API call fails.
         """
         cron = _hhmm_to_cron(send_time)
-        body_bytes = json.dumps({"theme": theme, "level": level}).encode("utf-8")
+        body_bytes = json.dumps({"theme": theme}).encode("utf-8")
 
         job = scheduler_v1.Job(
             name=self._job_name,

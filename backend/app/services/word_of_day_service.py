@@ -58,19 +58,13 @@ class WordOfDayService:
         """
         Run the daily Word of the Day job.
 
-        Workflow:
-        1. Check if already sent today (unless force=True)
-        2. Generate 6 template parameters with LLM
-        3. Validate parameters
-        4. If invalid, retry with repair prompt (up to 2 retries)
-        5. If still invalid, use fallback parameters
-        6. Get recipients (all active DB students, or single to_number)
-        7. Send to each recipient with delay between sends
-        8. Log each send
+        In multi-recipient mode, recipients are grouped by their english_level and
+        separate content is generated for each level. The level parameter is only
+        used in single-recipient mode.
 
         Args:
             theme: Topic theme for content generation
-            level: Difficulty level ("beginner" or "intermediate")
+            level: Difficulty level — only used in single-recipient mode
             force: If True, send even if already sent today
 
         Returns:
@@ -78,7 +72,7 @@ class WordOfDayService:
             - status: "success", "partial", "skipped", or "error"
             - sent_count, failed_count, total_recipients
             - date, used_fallback, validation_errors, preview
-            - sends: list of per-recipient results
+            - sends: list of per-recipient results (dict in single-recipient mode)
         """
         from datetime import date
 
@@ -95,12 +89,6 @@ class WordOfDayService:
                 "sends": [],
             }
 
-        # Step 1: Generate and validate content
-        params, validation_errors, used_fallback = self._generate_and_validate(
-            theme=theme, level=level
-        )
-
-        # Step 2: Get recipients
         recipients = self._get_recipients()
 
         if not recipients:
@@ -110,36 +98,86 @@ class WordOfDayService:
                 "failed_count": 0,
                 "total_recipients": 0,
                 "date": date.today().isoformat(),
-                "used_fallback": used_fallback,
+                "used_fallback": False,
                 "validation_errors": ["No recipients found"],
                 "preview": None,
                 "sends": [],
             }
 
-        # Step 3: Send to each recipient
-        sends = []
+        if self.use_multi_recipient:
+            return self._run_by_level(theme=theme, recipients=recipients)
+
+        # Single-recipient mode: use the provided level
+        params, validation_errors, used_fallback = self._generate_and_validate(
+            theme=theme, level=level
+        )
+        send_result = self._send_to_recipient(
+            recipient=recipients[0],
+            params=params,
+            theme=theme,
+            level=level,
+            used_fallback=used_fallback,
+        )
+        return {
+            "status": "success" if send_result["sent"] else "error",
+            "sent_count": 1 if send_result["sent"] else 0,
+            "failed_count": 0 if send_result["sent"] else 1,
+            "total_recipients": 1,
+            "date": date.today().isoformat(),
+            "used_fallback": used_fallback,
+            "validation_errors": validation_errors,
+            "preview": f"Word: {params.get('word_phrase', 'N/A')}",
+            "sends": send_result,
+        }
+
+    def _run_by_level(self, theme: str, recipients: List[Dict]) -> Dict:
+        """
+        Group recipients by english_level, generate level-appropriate content
+        for each group, and send. Called only in multi-recipient mode.
+        """
+        from collections import defaultdict
+        from datetime import date
+
+        groups: Dict[str, List[Dict]] = defaultdict(list)
+        for r in recipients:
+            groups[r["english_level"]].append(r)
+
+        sends: List[Dict] = []
         sent_count = 0
         failed_count = 0
+        any_fallback = False
+        all_validation_errors: List[str] = []
+        previews: List[str] = []
+        is_first_send = True
 
-        for idx, recipient in enumerate(recipients):
-            if idx > 0:
-                time.sleep(self.send_delay)
-
-            send_result = self._send_to_recipient(
-                recipient=recipient,
-                params=params,
-                theme=theme,
-                level=level,
-                used_fallback=used_fallback,
+        for lvl, group in groups.items():
+            params, validation_errors, used_fallback = self._generate_and_validate(
+                theme=theme, level=lvl
             )
-            sends.append(send_result)
+            any_fallback = any_fallback or used_fallback
+            all_validation_errors.extend(validation_errors)
+            previews.append(f"{lvl}: {params.get('word_phrase', 'N/A')}")
 
-            if send_result["sent"]:
-                sent_count += 1
-            else:
-                failed_count += 1
+            for recipient in group:
+                if not is_first_send:
+                    time.sleep(self.send_delay)
+                is_first_send = False
 
-        if sent_count == len(recipients):
+                send_result = self._send_to_recipient(
+                    recipient=recipient,
+                    params=params,
+                    theme=theme,
+                    level=lvl,
+                    used_fallback=used_fallback,
+                )
+                sends.append(send_result)
+                if send_result["sent"]:
+                    sent_count += 1
+                else:
+                    failed_count += 1
+
+        total = len(recipients)
+        if sent_count == total:
             status = "success"
         elif sent_count > 0:
             status = "partial"
@@ -150,12 +188,12 @@ class WordOfDayService:
             "status": status,
             "sent_count": sent_count,
             "failed_count": failed_count,
-            "total_recipients": len(recipients),
+            "total_recipients": total,
             "date": date.today().isoformat(),
-            "used_fallback": used_fallback,
-            "validation_errors": validation_errors,
-            "preview": f"Word: {params.get('word_phrase', 'N/A')}",
-            "sends": sends if self.use_multi_recipient else sends[0] if sends else None,
+            "used_fallback": any_fallback,
+            "validation_errors": all_validation_errors,
+            "preview": " | ".join(previews) if previews else None,
+            "sends": sends,
         }
 
     def _generate_and_validate(
@@ -194,7 +232,7 @@ class WordOfDayService:
                         )
                     except LLMError as e:
                         print(f"LLM repair failed on attempt {attempt}: {e}")
-                        break
+                        continue
 
                 valid, _ = validate_template_params(params)
                 validation_errors = []
@@ -217,7 +255,7 @@ class WordOfDayService:
         return params, validation_errors, used_fallback
 
     def _get_recipients(self) -> List[Dict]:
-        """Return a list of recipient dicts with phone_number, first_name."""
+        """Return a list of recipient dicts with phone_number, first_name, english_level."""
         if self.use_multi_recipient:
             from app.repositories.student import StudentRepository
             repo = StudentRepository(self.db_session)
@@ -227,10 +265,18 @@ class WordOfDayService:
                     "phone_number": s.phone_number,
                     "student_id": s.phone_number,
                     "first_name": s.first_name,
+                    "english_level": s.english_level,
                 }
                 for s in students
             ]
-        return [{"phone_number": self.to_number, "student_id": None, "first_name": None}]
+        return [
+            {
+                "phone_number": self.to_number,
+                "student_id": None,
+                "first_name": None,
+                "english_level": "beginner",
+            }
+        ]
 
     def _send_to_recipient(
         self,
