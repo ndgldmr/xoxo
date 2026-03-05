@@ -1,11 +1,22 @@
 """Message generation and sending endpoints."""
 import logging
 import time
+from datetime import date
+from typing import Annotated, Optional
 
-from fastapi import APIRouter, HTTPException, Security
+from fastapi import APIRouter, Depends, HTTPException, Query, Security
+from sqlalchemy.orm import Session
 
-from app.api.deps import verify_api_key, get_service, get_preview_service
-from app.api.schemas import SendRequest, SendResponse, PreviewResponse, BroadcastRequest, BroadcastResponse
+from app.api.deps import verify_api_key, get_service, get_preview_service, get_db, get_gcp_scheduler_client
+from app.api.schemas import (
+    SendRequest, SendResponse,
+    BroadcastRequest, BroadcastResponse,
+    GenerateRequest, GenerateResponse, GeneratedMessageResponse,
+    TodayMessagesResponse, StoredMessageResponse,
+)
+from app.db.models.message import LEVELS
+from app.integrations.gcp_scheduler import GCPSchedulerClient, GCPSchedulerError
+from app.repositories.message import MessageRepository
 
 logger = logging.getLogger(__name__)
 
@@ -76,15 +87,85 @@ async def broadcast_message(request: BroadcastRequest) -> BroadcastResponse:
         db_session.close()
 
 
-@router.get("/preview", response_model=PreviewResponse, dependencies=_auth)
-async def preview_message(
-    theme: str = "daily life",
-    level: str = "beginner",
-) -> PreviewResponse:
-    """Generate and validate a message without sending it."""
+
+@router.post("/messages/generate", response_model=GenerateResponse, dependencies=_auth)
+async def generate_daily_messages(
+    request: GenerateRequest,
+    db: Annotated[Session, Depends(get_db)],
+) -> GenerateResponse:
+    """
+    Generate and store today's messages for all levels (or a single level).
+
+    Called automatically by the GCP generate job. Admins can also call this
+    to regenerate messages (e.g. if they want a fresh batch before the send job runs).
+
+    If theme is omitted, reads it from the GCP send job config.
+    """
+    from app.config import get_settings
+
+    settings = get_settings()
+    theme = request.theme
+
+    # If no theme provided, read from GCP send job config
+    if not theme:
+        if not settings.gcp_project_id:
+            theme = "daily life"
+        else:
+            try:
+                gcp_client = get_gcp_scheduler_client()
+                config = gcp_client.get_config()
+                theme = config.get("theme") or "daily life"
+            except Exception:
+                theme = "daily life"
+
+    target_levels = [request.level] if request.level else LEVELS
+
     service = get_preview_service()
-    try:
-        result = service.preview_message(theme=theme, level=level)
-        return PreviewResponse(**result)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    repo = MessageRepository(db)
+    today = date.today()
+    results = []
+
+    for level in target_levels:
+        result = service.generate_message(theme=theme, level=level)
+
+        if result["valid"]:
+            repo.upsert(
+                date=today,
+                level=level,
+                theme=theme,
+                template_params=result["template_params"],
+                formatted_message=result["formatted_message"],
+            )
+
+        results.append(GeneratedMessageResponse(
+            level=level,
+            theme=theme,
+            formatted_message=result["formatted_message"],
+            valid=result["valid"],
+            validation_errors=result["validation_errors"],
+        ))
+
+    return GenerateResponse(date=today.isoformat(), results=results)
+
+
+@router.get("/messages/today", response_model=TodayMessagesResponse, dependencies=_auth)
+async def get_today_messages(
+    db: Annotated[Session, Depends(get_db)],
+) -> TodayMessagesResponse:
+    """Return today's pre-generated messages from the messages table."""
+    repo = MessageRepository(db)
+    today = date.today()
+    messages = repo.get_by_date(today)
+
+    return TodayMessagesResponse(
+        date=today.isoformat(),
+        messages=[
+            StoredMessageResponse(
+                level=m.level,
+                theme=m.theme,
+                formatted_message=m.formatted_message,
+                generated_at=m.updated_at.isoformat(),
+            )
+            for m in messages
+        ],
+    )

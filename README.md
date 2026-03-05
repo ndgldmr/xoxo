@@ -35,6 +35,9 @@ WhatsApp "English Word/Phrase of the Day" service for Brazilian Portuguese speak
 
 - **AI-Generated Content** — Uses any OpenAI-compatible LLM (Gemini, GPT-4o, etc.) to generate a unique daily English word or phrase with translation, pronunciation, usage guidance, and bilingual examples
 - **Multi-Recipient** — Sends to all active students stored in a PostgreSQL database
+- **Level-Differentiated Messages** — Separate content is generated for each English level (Beginner, Intermediate, Advanced) so every student receives age-appropriate material
+- **Pre-Generated Message Store** — Daily messages are generated at midnight and stored in the database; the send job reads from the store rather than calling the LLM at send time, ensuring all students receive identical, validated content
+- **Message Preview** — Admins can see the exact WhatsApp message queued for each level in the Schedule tab, and regenerate any level on demand
 - **Strict Validation** — All 6 message fields are validated for format, length, language, and content rules before sending
 - **Auto-Retry with Repair** — If validation fails, automatically retries with a repair prompt (up to 2 retries)
 - **Resilient LLM Pipeline** — On 503 errors, automatically retries the primary model (10s then 30s); if still unavailable, falls back to `gemini-2.0-flash-lite`; if both fail, no message is sent rather than delivering stale content
@@ -88,9 +91,35 @@ WhatsApp "English Word/Phrase of the Day" service for Brazilian Portuguese speak
 
 ### Request Flows
 
-**Daily Send**
+**Daily Generate (midnight)**
 ```
-Trigger: API (POST /send-word-of-day) or GCP Cloud Scheduler
+Trigger: GCP Cloud Scheduler (xoxo-daily-generate) → POST /messages/generate
+                       │
+                       ▼
+          ┌────────────┼────────────┐
+       beginner  intermediate   advanced
+          │            │            │
+          ▼            ▼            ▼
+      Generate      Generate     Generate
+      params        params       params
+      via LLM       via LLM      via LLM
+          │            │            │
+          ▼            ▼            ▼
+       Validate     Validate     Validate
+       (retry/      (retry/      (retry/
+       fallback)    fallback)    fallback)
+          │            │            │
+          └────────────┼────────────┘
+                       │
+                ┌──────▼───────────────┐
+                │ Upsert to messages   │
+                │ table (date + level) │
+                └──────────────────────┘
+```
+
+**Daily Send (morning)**
+```
+Trigger: GCP Cloud Scheduler (xoxo-daily-send) → POST /send-word-of-day
                        │
                        ▼
          Already sent today? ──Yes──► Skip (unless force=true)
@@ -105,14 +134,11 @@ Trigger: API (POST /send-word-of-day) or GCP Cloud Scheduler
        beginner  intermediate   advanced
           │            │            │
           ▼            ▼            ▼
-      Generate      Generate     Generate
-      params        params       params
-      via LLM       via LLM      via LLM
-          │            │            │
-          ▼            ▼            ▼
-       Validate     Validate     Validate
-       (retry/      (retry/      (retry/
-       fallback)    fallback)    fallback)
+      Load stored   Load stored  Load stored
+      message from  message from message from
+      messages DB   messages DB  messages DB
+      (fallback:    (fallback:   (fallback:
+       LLM)          LLM)         LLM)
           │            │            │
           └────────────┼────────────┘
                        │
@@ -202,8 +228,9 @@ cp .env.example .env
 | `DATABASE_URL` | Yes | — | PostgreSQL connection string |
 | `API_KEY` | Yes | — | Secret key required by all protected API endpoints |
 | `GCP_PROJECT_ID` | No | — | GCP project ID (production only, for schedule management) |
-| `GCP_LOCATION` | No | — | GCP region where the Cloud Scheduler job lives (e.g. `us-central1`) |
-| `GCP_SCHEDULER_JOB_ID` | No | — | Cloud Scheduler job name (e.g. `xoxo-daily-send`) |
+| `GCP_LOCATION` | No | — | GCP region where the Cloud Scheduler jobs live (e.g. `us-central1`) |
+| `GCP_SCHEDULER_JOB_ID` | No | — | Send job name (e.g. `xoxo-daily-send`) |
+| `GCP_GENERATE_JOB_ID` | No | — | Generate job name (e.g. `xoxo-daily-generate`) |
 | `SERVICE_URL` | No | — | Cloud Run service URL (e.g. `https://xoxo-....run.app`) |
 | `DRY_RUN` | No | `true` | If `true`, prints messages instead of sending |
 | `AUDIT_LOG_PATH` | No | `audit_log.jsonl` | Path to the JSONL audit log file |
@@ -234,6 +261,7 @@ API_KEY=your_generated_api_key
 GCP_PROJECT_ID=your_gcp_project_id
 GCP_LOCATION=us-central1
 GCP_SCHEDULER_JOB_ID=xoxo-daily-send
+GCP_GENERATE_JOB_ID=xoxo-daily-generate
 SERVICE_URL=https://your-cloud-run-service-url
 
 # Application
@@ -261,8 +289,10 @@ Expected output:
 ```
 Initializing database...
 ✓ Database initialized successfully!
-  Tables created: students
+  Tables created: students, messages
 ```
+
+> Tables are also created automatically on app startup (via the FastAPI lifespan event), so `init_db.py` is mainly useful for local setup before the server has run.
 
 ### Students Table Schema
 
@@ -276,6 +306,23 @@ Initializing database...
 | `is_active` | `BOOLEAN` | `false` = soft-deleted |
 | `created_at` | `TIMESTAMP WITH TIME ZONE` | Auto-set on creation |
 | `updated_at` | `TIMESTAMP WITH TIME ZONE` | Auto-updated on change |
+
+### Messages Table Schema
+
+Pre-generated daily messages are stored here. The send job reads from this table instead of calling the LLM at send time.
+
+| Column | Type | Description |
+|---|---|---|
+| `id` | `INTEGER` PK | Auto-increment primary key |
+| `date` | `DATE` | The calendar date the message was generated for |
+| `level` | `VARCHAR(20)` | `beginner`, `intermediate`, or `advanced` |
+| `theme` | `VARCHAR(255)` | The theme used when generating the message |
+| `template_params` | `JSONB` | The 6 structured fields produced by the LLM |
+| `formatted_message` | `TEXT` | The verbatim WhatsApp message text |
+| `created_at` | `TIMESTAMP WITH TIME ZONE` | Auto-set on creation |
+| `updated_at` | `TIMESTAMP WITH TIME ZONE` | Auto-updated on change |
+
+The `(date, level)` pair is unique — re-generating a level upserts the row.
 
 ---
 
@@ -362,15 +409,27 @@ The dashboard has a login screen. Enter your `API_KEY` (the same value as `API_K
 
 ### Schedule tab
 
-Configure the automated daily send schedule. Changes are applied live to the GCP Cloud Scheduler job.
+Two panels side by side:
+
+**Schedule config** — Configure the automated daily send schedule. Changes are applied live to the GCP Cloud Scheduler jobs.
 
 | Field | Description |
 |---|---|
 | **Send time** | Time of day to send the message (HH:MM) |
 | **Timezone** | IANA timezone for the send time (e.g. `America/Sao_Paulo`) |
-| **Theme** | Topic hint passed to the LLM (e.g. `"travel"`, `"work"`) |
+| **Theme** | Topic hint passed to the LLM (e.g. `"travel"`, `"work"`). Saved to both the send job and the generate job automatically. |
 
-> **Note:** The Schedule tab returns a 503 error in local development unless all four GCP environment variables are configured.
+Use the **Save changes** button (top-right of the panel) to apply edits. A **Reset** button appears next to it while there are unsaved changes.
+
+**Today's Messages** — Shows the exact WhatsApp message that is queued for each English level today. Messages are pre-generated at midnight by the `xoxo-daily-generate` Cloud Scheduler job.
+
+- Each level row shows a green dot (message ready) or grey dot (not yet generated), plus the generation timestamp.
+- Click any level row to open a dialog with the full message rendered as rich text (WhatsApp formatting — `*bold*`, `_italic_`, `~strikethrough~` — is displayed as styled text).
+- The dialog has a **Regenerate** button to re-generate that level's message on demand (saves new content to the database).
+- A **Regenerate All** button (top-right of the panel) re-generates all three levels at once.
+- Regeneration is disabled while the theme form has unsaved changes — save first.
+
+> **Note:** The Schedule tab returns a 503 error in local development unless all GCP environment variables (`GCP_PROJECT_ID`, `GCP_LOCATION`, `GCP_SCHEDULER_JOB_ID`, `GCP_GENERATE_JOB_ID`, `SERVICE_URL`) are configured.
 
 ### Send Announcement tab
 
@@ -411,9 +470,11 @@ The `deploy.sh` script in the repo root handles the full backend deployment in o
 | 2 | Creates the Artifact Registry Docker repository if it doesn't exist |
 | 3 | Builds and pushes the Docker image via Cloud Build (runs remotely, `linux/amd64`) |
 | 4 | Deploys the new image to Cloud Run with all env vars from `backend/.env` |
-| 5 | Creates or updates the Cloud Scheduler job (`xoxo-daily-send`) |
+| 5 | Creates or updates the daily **send** Cloud Scheduler job (`xoxo-daily-send`) |
+| 6 | Creates or updates the midnight **generate** Cloud Scheduler job (`xoxo-daily-generate`) |
+| 7 | Prints a summary with both job names and the Cloud Run service URL |
 
-> **Note:** `DRY_RUN` is always forced to `false` in the deployed service, regardless of what is set in `backend/.env`. The Scheduler job's cron schedule and timezone are **not** overwritten on re-deploys — manage those via the Schedule tab in the admin UI.
+> **Note:** `DRY_RUN` is always forced to `false` in the deployed service, regardless of what is set in `backend/.env`. The Scheduler jobs' cron schedules and timezones are **not** overwritten on re-deploys — manage those via the Schedule tab in the admin UI.
 
 ### Usage
 
@@ -454,7 +515,13 @@ Returns basic service info. No authentication required.
   "version": "0.1.0",
   "endpoints": {
     "send": "POST /send-word-of-day",
+    "broadcast": "POST /broadcast",
     "health": "GET /health",
+    "stats": "GET /stats",
+    "schedule": "GET /schedule",
+    "update_schedule": "PATCH /schedule",
+    "generate_messages": "POST /messages/generate",
+    "today_messages": "GET /messages/today",
     "list_students": "GET /students",
     "add_student": "POST /students",
     "remove_student": "DELETE /students/{phone_number}"
@@ -589,42 +656,6 @@ curl -X POST https://your-domain.com/broadcast \
 
 ---
 
-### `POST /broadcast`
-
-Sends a custom message to all active, opted-in students. Optionally filters by English level. **Requires `X-API-Key`.**
-
-**Request body**
-```json
-{
-  "message": "Classes are cancelled this Friday. See you next week!",
-  "level": "beginner"
-}
-```
-
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `message` | string | Yes | The message text to send |
-| `level` | string | No | Restrict recipients to `"beginner"`, `"intermediate"`, or `"advanced"`. Omit (or `null`) to send to all levels. |
-
-**Response**
-```json
-{
-  "sent_count": 38,
-  "failed_count": 1,
-  "total_recipients": 39
-}
-```
-
-**Example**
-```bash
-curl -X POST https://your-domain.com/broadcast \
-  -H "X-API-Key: your_api_key" \
-  -H "Content-Type: application/json" \
-  -d '{"message": "No class this Monday!", "level": null}'
-```
-
----
-
 ### `GET /schedule`
 
 Returns the current schedule config read live from the GCP Cloud Scheduler job. **Requires `X-API-Key`.** Returns `503` if GCP env vars are not set.
@@ -665,7 +696,7 @@ Updates the schedule config in the GCP Cloud Scheduler job. All fields are optio
 | `send_time` | string | `HH:MM` format (e.g. `"09:00"`) |
 | `timezone` | string | IANA timezone string (e.g. `"America/Sao_Paulo"`) |
 
-Returns the full updated `ScheduleConfigResponse` after applying changes.
+Returns the full updated `ScheduleConfigResponse` after applying changes. If `theme` or `timezone` is updated, the generate job (`GCP_GENERATE_JOB_ID`) is also synced automatically.
 
 **Example** — update only the send time:
 ```bash
@@ -673,6 +704,93 @@ curl -X PATCH https://your-domain.com/schedule \
   -H "X-API-Key: your_api_key" \
   -H "Content-Type: application/json" \
   -d '{"send_time": "09:00"}'
+```
+
+---
+
+### `POST /messages/generate`
+
+Pre-generates and stores today's Word of the Day message(s) in the database. Called automatically at midnight by the `xoxo-daily-generate` Cloud Scheduler job; also available for admins to trigger regeneration on demand. **Requires `X-API-Key`.**
+
+**Request body**
+```json
+{
+  "theme": "travel",
+  "level": "beginner"
+}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `theme` | string | Yes | Topic hint for the LLM |
+| `level` | string | No | If provided, generates only for that level (`"beginner"`, `"intermediate"`, or `"advanced"`). Omit to generate all three levels. |
+
+**Response**
+```json
+{
+  "date": "2026-03-04",
+  "results": [
+    {
+      "level": "beginner",
+      "theme": "travel",
+      "formatted_message": "🇺🇸  *Palavra/Frase do Dia:* ...",
+      "valid": true,
+      "validation_errors": []
+    }
+  ]
+}
+```
+
+Each result has `valid: false` and a populated `validation_errors` list if the LLM failed to produce a valid message after all retries. Valid results are upserted to the `messages` table.
+
+**Example**
+```bash
+# Generate all levels
+curl -X POST https://your-domain.com/messages/generate \
+  -H "X-API-Key: your_api_key" \
+  -H "Content-Type: application/json" \
+  -d '{"theme": "travel"}'
+
+# Regenerate only beginner
+curl -X POST https://your-domain.com/messages/generate \
+  -H "X-API-Key: your_api_key" \
+  -H "Content-Type: application/json" \
+  -d '{"theme": "travel", "level": "beginner"}'
+```
+
+---
+
+### `GET /messages/today`
+
+Returns the stored messages for today. **Requires `X-API-Key`.**
+
+**Response**
+```json
+{
+  "date": "2026-03-04",
+  "messages": [
+    {
+      "level": "beginner",
+      "theme": "travel",
+      "formatted_message": "🇺🇸  *Palavra/Frase do Dia:* Have a safe trip\n\n📝 ...",
+      "generated_at": "2026-03-04T00:00:12.345678"
+    },
+    {
+      "level": "intermediate",
+      "theme": "travel",
+      "formatted_message": "...",
+      "generated_at": "2026-03-04T00:00:18.123456"
+    }
+  ]
+}
+```
+
+Returns an empty `messages` array if no messages have been generated for today yet.
+
+**Example**
+```bash
+curl https://your-domain.com/messages/today \
+  -H "X-API-Key: your_api_key"
 ```
 
 ---
@@ -1030,9 +1148,14 @@ python -m app.main send --force
 
 ### Production — GCP Cloud Scheduler
 
-In production the app is deployed on GCP Cloud Run and triggered by a GCP Cloud Scheduler job. The job calls `POST /send-word-of-day` on a cron schedule with the theme, level, and API key in the request.
+In production, two GCP Cloud Scheduler jobs drive the daily workflow:
 
-You can view and update the schedule via the API:
+| Job | Default time | Endpoint | Purpose |
+|---|---|---|---|
+| `xoxo-daily-generate` | 12:00 AM | `POST /messages/generate` | Generate and store messages for each level |
+| `xoxo-daily-send` | 8:00 AM (configurable) | `POST /send-word-of-day` | Read stored messages and deliver to students |
+
+Both jobs are created/updated by `deploy.sh`. You can update the send schedule (time, timezone, theme) via the admin dashboard Schedule tab or the API — changes propagate to both Cloud Scheduler jobs automatically.
 
 ```bash
 # View current schedule
@@ -1050,6 +1173,7 @@ Or manage directly via the GCP Console → Cloud Scheduler, or with `gcloud`:
 ```bash
 gcloud scheduler jobs list --location=us-central1
 gcloud scheduler jobs describe xoxo-daily-send --location=us-central1
+gcloud scheduler jobs describe xoxo-daily-generate --location=us-central1
 ```
 
 ### Local dev — system cron
@@ -1233,9 +1357,9 @@ backend/
 │   │   ├── webhook_routes.py       # Webhook handler (STOP/START opt-outs)
 │   │   └── routers/
 │   │       ├── students.py         # Student CRUD endpoints
-│   │       ├── messages.py         # POST /send-word-of-day, POST /broadcast, GET /preview
+│   │       ├── messages.py         # POST /send-word-of-day, POST /broadcast, POST /messages/generate, GET /messages/today
 │   │       ├── admin.py            # GET /health, GET /stats, GET /audit-log
-│   │       └── schedule.py         # GET /schedule, PATCH /schedule
+│   │       └── schedule.py         # GET /schedule, PATCH /schedule (syncs both GCP jobs)
 │   ├── services/
 │   │   └── word_of_day_service.py  # Orchestration: generate → validate → send
 │   ├── domain/
@@ -1251,18 +1375,22 @@ backend/
 │   │   ├── base.py                 # SQLAlchemy Base and TimestampMixin
 │   │   ├── session.py              # Database engine and session management
 │   │   └── models/
-│   │       └── student.py          # Student ORM model
+│   │       ├── student.py          # Student ORM model
+│   │       └── message.py          # Message ORM model (pre-generated daily messages)
 │   └── repositories/
-│       └── student.py              # Student CRUD operations
+│       ├── student.py              # Student CRUD operations
+│       └── message.py              # Message upsert and lookup by date/level
 ├── scripts/
 │   ├── init_db.py                  # Create all database tables
 │   └── manage_students.py          # Student management CLI (add, list, remove, opt-out)
 ├── deploy.sh                       # One-command GCP deployment (Cloud Build + Cloud Run + Scheduler)
 ├── tests/
 │   ├── test_validators.py          # Validation rule tests
-│   ├── test_service_happy_path.py  # Service integration tests
+│   ├── test_service_happy_path.py  # Service integration tests (including stored message logic)
 │   ├── test_enrollment.py          # Phone normalization, welcome message, and POST /students tests
-│   └── test_broadcast.py           # POST /broadcast endpoint tests
+│   ├── test_broadcast.py           # POST /broadcast endpoint tests
+│   ├── test_message_repository.py  # MessageRepository unit tests (SQLite in-memory)
+│   └── test_generate_endpoint.py   # POST /messages/generate and GET /messages/today tests
 ├── Dockerfile
 └── pyproject.toml
 
@@ -1272,12 +1400,12 @@ frontend/
 │   │   ├── client.ts               # Base fetch wrapper (attaches X-API-Key, throws on non-2xx)
 │   │   ├── students.ts             # Typed functions for all student endpoints
 │   │   ├── schedule.ts             # Typed functions for GET/PATCH /schedule
-│   │   └── messages.ts             # Typed functions for POST /broadcast
+│   │   └── messages.ts             # Typed functions for POST /broadcast, POST /messages/generate, GET /messages/today
 │   ├── components/
 │   │   ├── ui/                     # shadcn/ui primitives (Button, Table, Dialog, etc.)
 │   │   ├── LoginScreen.tsx         # API key entry form
 │   │   ├── StudentsTab.tsx         # Student table with search, filter, and CRUD actions
-│   │   ├── ScheduleTab.tsx         # Schedule config form (time, timezone, theme, level)
+│   │   ├── ScheduleTab.tsx         # Schedule config form + Today's Messages preview with per-level dialogs
 │   │   ├── AnnouncementTab.tsx     # Broadcast message form (message, level filter)
 │   │   ├── AddStudentDialog.tsx    # Add student form dialog
 │   │   ├── EditStudentDialog.tsx   # Edit student form dialog (pre-filled)
@@ -1333,7 +1461,7 @@ frontend/
 
 ### `GET /schedule` or `PATCH /schedule` returning 503
 
-The schedule endpoints are production-only and require all four GCP env vars to be set: `GCP_PROJECT_ID`, `GCP_LOCATION`, `GCP_SCHEDULER_JOB_ID`, `SERVICE_URL`. Leave them blank in local dev and the 503 is expected.
+The schedule endpoints are production-only and require all five GCP env vars to be set: `GCP_PROJECT_ID`, `GCP_LOCATION`, `GCP_SCHEDULER_JOB_ID`, `GCP_GENERATE_JOB_ID`, `SERVICE_URL`. Leave them blank in local dev and the 503 is expected.
 
 If the vars are set but you're still getting an error, make sure Application Default Credentials are configured:
 

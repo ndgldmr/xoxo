@@ -1,4 +1,6 @@
 """FastAPI application factory."""
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -11,10 +13,20 @@ from app.api.webhook_routes import router as webhook_router
 
 settings = get_settings()
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    if settings.database_url:
+        from app.db.session import init_db
+        init_db()
+    yield
+
+
 app = FastAPI(
     title="XOXO Education - Word of the Day",
     description="WhatsApp English Word/Phrase of the Day service",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -48,7 +60,8 @@ async def root():
             "delete_student": "DELETE /students/{phone_number}",
             # Messages
             "send": "POST /send-word-of-day",
-            "preview": "GET /preview",
+            "generate_daily": "POST /messages/generate",
+            "today_messages": "GET /messages/today",
             # Schedule
             "get_schedule": "GET /schedule",
             "update_schedule": "PATCH /schedule",

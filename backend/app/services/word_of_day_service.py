@@ -1,6 +1,9 @@
 """Service layer for Word of the Day message generation and sending."""
+import logging
 import time
 from typing import Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 from sqlalchemy.orm import Session
 
 from app.domain.validators import validate_template_params, ValidationError
@@ -143,13 +146,42 @@ class WordOfDayService:
             "sends": send_result,
         }
 
+    def _load_stored_messages(self) -> Dict[str, Dict]:
+        """
+        Load today's pre-generated messages from the messages table.
+
+        Returns a dict keyed by level with keys: template_params, formatted_message, theme.
+        Empty dict if no stored messages exist or DB is not available.
+        """
+        from datetime import date
+        from app.repositories.message import MessageRepository
+
+        if not self.db_session:
+            return {}
+
+        repo = MessageRepository(self.db_session)
+        stored = repo.get_by_date(date.today())
+        return {
+            m.level: {
+                "template_params": m.template_params,
+                "formatted_message": m.formatted_message,
+                "theme": m.theme,
+            }
+            for m in stored
+        }
+
     def _run_by_level(self, theme: str, recipients: List[Dict]) -> Dict:
         """
         Group recipients by english_level, generate level-appropriate content
         for each group, and send. Called only in multi-recipient mode.
+
+        Checks the messages table for pre-generated content first. Falls back
+        to live LLM generation if no stored message exists for a given level.
         """
         from collections import defaultdict
         from datetime import date
+
+        stored = self._load_stored_messages()
 
         groups: Dict[str, List[Dict]] = defaultdict(list)
         for r in recipients:
@@ -164,9 +196,17 @@ class WordOfDayService:
         is_first_send = True
 
         for lvl, group in groups.items():
-            params, validation_errors, used_fallback = self._generate_and_validate(
-                theme=theme, level=lvl
-            )
+            # Use pre-generated message if available for today
+            if lvl in stored:
+                logger.info("Using stored message for level '%s'", lvl)
+                params = stored[lvl]["template_params"]
+                validation_errors: List[str] = []
+                used_fallback = False
+            else:
+                logger.info("No stored message for level '%s', generating fresh", lvl)
+                params, validation_errors, used_fallback = self._generate_and_validate(
+                    theme=theme, level=lvl
+                )
             any_fallback = any_fallback or used_fallback
             all_validation_errors.extend(validation_errors)
 
@@ -374,6 +414,36 @@ class WordOfDayService:
             "sent": sent,
             "provider_message_id": provider_message_id,
             "error_message": error_message,
+        }
+
+    def generate_message(
+        self,
+        theme: str,
+        level: str,
+    ) -> Dict:
+        """
+        Generate and validate a message for one level without sending.
+
+        Returns:
+            Dict with valid, template_params, formatted_message, and validation_errors
+        """
+        from app.integrations.wasender_client import format_template_params_as_text
+
+        params, validation_errors, used_fallback = self._generate_and_validate(
+            theme=theme, level=level
+        )
+        if params is None:
+            return {
+                "valid": False,
+                "template_params": None,
+                "formatted_message": None,
+                "validation_errors": validation_errors,
+            }
+        return {
+            "valid": True,
+            "template_params": params,
+            "formatted_message": format_template_params_as_text(params),
+            "validation_errors": [],
         }
 
     def preview_message(
