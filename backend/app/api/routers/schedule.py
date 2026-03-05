@@ -56,4 +56,21 @@ async def update_schedule(
     except GCPSchedulerError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
+    # Keep the generate job's theme and timezone in sync if it is configured
+    from app.config import get_settings
+    settings = get_settings()
+    if settings.gcp_generate_job_id:
+        try:
+            gcp_client.update_job_theme_and_timezone(
+                job_id=settings.gcp_generate_job_id,
+                theme=merged["theme"],
+                timezone=merged["timezone"],
+            )
+        except GCPSchedulerError as exc:
+            # Non-fatal: log the error but don't fail the request
+            import logging
+            logging.getLogger(__name__).warning(
+                "Failed to sync generate job theme/timezone: %s", exc
+            )
+
     return ScheduleConfigResponse(**merged)

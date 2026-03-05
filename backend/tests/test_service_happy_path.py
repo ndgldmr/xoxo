@@ -181,7 +181,7 @@ def test_multi_recipient_generates_content_per_level(
     temp_audit_log,
 ):
     """In multi-recipient mode, content is generated separately for each english level."""
-    from unittest.mock import MagicMock
+    from unittest.mock import MagicMock, patch
 
     beginner_params = {**VALID_PARAMS, "word_phrase": "Good morning"}
     intermediate_params = {**VALID_PARAMS, "word_phrase": "Nevertheless"}
@@ -207,9 +207,8 @@ def test_multi_recipient_generates_content_per_level(
 
     mock_db = MagicMock()
 
-    with __import__("unittest.mock", fromlist=["patch"]).patch(
-        "app.repositories.student.StudentRepository", return_value=mock_repo
-    ):
+    with patch("app.repositories.student.StudentRepository", return_value=mock_repo), \
+         patch.object(WordOfDayService, "_load_stored_messages", return_value={}):
         svc = WordOfDayService(
             llm_client=mock_llm_client,
             whatsapp_client=mock_wasender_client,
@@ -238,31 +237,81 @@ def test_multi_recipient_generates_content_per_level(
     assert "intermediate" in result["preview"]
 
 
-def test_preview_generates_and_validates_without_sending(
-    service,
+def test_send_job_uses_stored_message_skips_llm(
     mock_llm_client,
     mock_wasender_client,
+    temp_audit_log,
 ):
-    """Test preview mode generates and validates but does not send."""
-    result = service.preview_message(theme="work", level="intermediate")
+    """When stored messages exist for today, the send job uses them without calling the LLM."""
+    from unittest.mock import MagicMock, patch
 
-    # LLM should be called
+    stored_beginner = {
+        "template_params": VALID_PARAMS,
+        "formatted_message": "🇺🇸 *Palavra/Frase do Dia:* Thank you\n\n...",
+        "theme": "greetings",
+    }
+
+    student = MagicMock()
+    student.phone_number = "+5511111111111"
+    student.first_name = "Ana"
+    student.english_level = "beginner"
+
+    mock_repo = MagicMock()
+    mock_repo.get_active_subscribers.return_value = [student]
+    mock_db = MagicMock()
+
+    with patch("app.repositories.student.StudentRepository", return_value=mock_repo), \
+         patch.object(WordOfDayService, "_load_stored_messages", return_value={"beginner": stored_beginner}):
+        svc = WordOfDayService(
+            llm_client=mock_llm_client,
+            whatsapp_client=mock_wasender_client,
+            audit_log=temp_audit_log,
+            db_session=mock_db,
+        )
+        result = svc.run_daily_job(theme="greetings")
+
+    assert result["status"] == "success"
+    assert result["sent_count"] == 1
+    # LLM must NOT be called when a stored message is available
+    mock_llm_client.generate_message_params.assert_not_called()
+    mock_wasender_client.send_template_message.assert_called_once()
+
+
+def test_send_job_falls_back_to_llm_when_no_stored_message(
+    mock_llm_client,
+    mock_wasender_client,
+    temp_audit_log,
+):
+    """When no stored message exists for a level, the send job generates fresh via LLM."""
+    from unittest.mock import MagicMock, patch
+
+    student = MagicMock()
+    student.phone_number = "+5511111111111"
+    student.first_name = "Ana"
+    student.english_level = "beginner"
+
+    mock_repo = MagicMock()
+    mock_repo.get_active_subscribers.return_value = [student]
+    mock_db = MagicMock()
+
+    # No stored messages — empty dict
+    with patch("app.repositories.student.StudentRepository", return_value=mock_repo), \
+         patch.object(WordOfDayService, "_load_stored_messages", return_value={}):
+        svc = WordOfDayService(
+            llm_client=mock_llm_client,
+            whatsapp_client=mock_wasender_client,
+            audit_log=temp_audit_log,
+            db_session=mock_db,
+        )
+        result = svc.run_daily_job(theme="greetings")
+
+    assert result["status"] == "success"
+    assert result["sent_count"] == 1
+    # LLM MUST be called as fallback
     mock_llm_client.generate_message_params.assert_called_once_with(
-        theme="work",
-        level="intermediate",
+        theme="greetings", level="beginner"
     )
 
-    # WaSender should NOT be called
-    mock_wasender_client.send_template_message.assert_not_called()
-
-    # Result should show validation status
-    assert result["valid"] is True
-    assert result["content"] == VALID_PARAMS
-    assert result["validation_errors"] == []
-
-    # No audit log entries for preview
-    events = service.audit_log.get_today_events()
-    assert len(events) == 0
 
 
 def test_fallback_llm_used_when_primary_fails(

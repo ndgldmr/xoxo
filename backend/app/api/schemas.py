@@ -70,12 +70,6 @@ class SendResponse(BaseModel):
     sends: Optional[List[Dict[str, Any]]] = None
 
 
-class PreviewResponse(BaseModel):
-    """Response model for the preview endpoint."""
-    valid: bool
-    content: Optional[Dict[str, str]] = None
-    validation_errors: List[str]
-
 
 class BroadcastRequest(BaseModel):
     """Request body for the broadcast endpoint."""
@@ -88,6 +82,45 @@ class BroadcastResponse(BaseModel):
     sent_count: int
     failed_count: int
     total_recipients: int
+
+
+# ---------------------------------------------------------------------------
+# Daily message generation schemas
+# ---------------------------------------------------------------------------
+
+class GenerateRequest(BaseModel):
+    """Request body for POST /messages/generate."""
+    theme: Optional[str] = Field(None, description="Topic theme. If omitted, reads from the GCP send job config.")
+    level: Optional[str] = Field(None, description="Single level to generate. If omitted, generates all levels.")
+
+
+class GeneratedMessageResponse(BaseModel):
+    """Result for one level in a generate response."""
+    level: str
+    theme: str
+    formatted_message: Optional[str] = None
+    valid: bool
+    validation_errors: List[str]
+
+
+class GenerateResponse(BaseModel):
+    """Response model for POST /messages/generate."""
+    date: str
+    results: List[GeneratedMessageResponse]
+
+
+class StoredMessageResponse(BaseModel):
+    """A pre-generated message as stored in the messages table."""
+    level: str
+    theme: str
+    formatted_message: str
+    generated_at: str  # ISO datetime
+
+
+class TodayMessagesResponse(BaseModel):
+    """Response model for GET /messages/today."""
+    date: str
+    messages: List[StoredMessageResponse]
 
 
 # ---------------------------------------------------------------------------

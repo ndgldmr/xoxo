@@ -110,6 +110,53 @@ class GCPSchedulerClient:
         except Exception as exc:
             raise GCPSchedulerError(f"Failed to update Cloud Scheduler job: {exc}") from exc
 
+    def update_job_theme_and_timezone(
+        self,
+        job_id: str,
+        theme: str,
+        timezone: str,
+    ) -> None:
+        """Update only the theme (body) and timezone for a given job ID.
+
+        Used for the generate job, which has its own cron schedule that the
+        admin does not control — only theme and timezone need to stay in sync
+        with the send job.
+
+        Raises:
+            GCPSchedulerError: if the API call fails.
+        """
+        job_name = (
+            f"projects/{self._project_id}"
+            f"/locations/{self._location}"
+            f"/jobs/{job_id}"
+        )
+        body_bytes = json.dumps({"theme": theme}).encode("utf-8")
+
+        job = scheduler_v1.Job(
+            name=job_name,
+            time_zone=timezone,
+            http_target=scheduler_v1.HttpTarget(
+                uri=f"{self._service_url}/messages/generate",
+                http_method=scheduler_v1.HttpMethod.POST,
+                body=body_bytes,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-API-Key": self._api_key,
+                },
+            ),
+        )
+
+        update_mask = FieldMask(
+            paths=["time_zone", "http_target.body", "http_target.headers"]
+        )
+
+        try:
+            self._client.update_job(job=job, update_mask=update_mask)
+        except Exception as exc:
+            raise GCPSchedulerError(
+                f"Failed to update generate job '{job_id}': {exc}"
+            ) from exc
+
 
 # ---------------------------------------------------------------------------
 # Helpers
