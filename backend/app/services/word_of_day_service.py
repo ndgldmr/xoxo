@@ -204,8 +204,10 @@ class WordOfDayService:
                 used_fallback = False
             else:
                 logger.info("No stored message for level '%s', generating fresh", lvl)
+                from app.repositories.message import MessageRepository
+                used_phrases = MessageRepository(self.db_session).get_past_word_phrases(lvl)
                 params, validation_errors, used_fallback = self._generate_and_validate(
-                    theme=theme, level=lvl
+                    theme=theme, level=lvl, used_phrases=used_phrases
                 )
             any_fallback = any_fallback or used_fallback
             all_validation_errors.extend(validation_errors)
@@ -264,7 +266,7 @@ class WordOfDayService:
         }
 
     def _generate_and_validate(
-        self, theme: str, level: str
+        self, theme: str, level: str, used_phrases: Optional[List[str]] = None
     ) -> tuple[dict, List[str], bool]:
         """
         Generate and validate 6 template parameters.
@@ -280,53 +282,74 @@ class WordOfDayService:
         Returns:
             (params dict, validation_errors list, used_fallback bool)
         """
-        # Step 1: get initial params from primary LLM
-        params = None
-        active_client = None
-        try:
-            params = self.llm_client.generate_message_params(theme=theme, level=level)
-            active_client = self.llm_client
-        except LLMError as e:
-            print(f"LLM generation failed: {e}")
-            if self.fallback_llm_client:
-                print(f"Trying fallback model ({self.fallback_llm_client.model})...")
-                try:
-                    params = self.fallback_llm_client.generate_message_params(
-                        theme=theme, level=level
-                    )
-                    active_client = self.fallback_llm_client
-                except LLMError as e2:
-                    print(f"Fallback LLM also failed: {e2}")
+        used_phrases_set = {p.lower() for p in used_phrases} if used_phrases else set()
+        max_unique_retries = 2
 
-        if params is None:
-            return None, ["LLM unavailable — message not sent"], False
-
-        # Step 2: validate and repair (up to 2 repair attempts)
-        max_retries = 2
-        validation_errors = []
-        for attempt in range(max_retries + 1):
+        for unique_attempt in range(max_unique_retries + 1):
+            # Step 1: get initial params from primary LLM
+            params = None
+            active_client = None
             try:
-                validate_template_params(params)
-                return params, [], False
-            except ValidationError as e:
-                validation_errors = e.errors
-                print(
-                    f"Validation failed (attempt {attempt + 1}/{max_retries + 1}): {validation_errors}"
+                params = self.llm_client.generate_message_params(
+                    theme=theme, level=level, used_phrases=used_phrases
                 )
-                if attempt >= max_retries:
-                    break
-                try:
-                    params = active_client.generate_repair_message_params(
-                        previous_output=params,
-                        validation_errors=validation_errors,
-                        theme=theme,
-                        level=level,
-                    )
-                except LLMError as e:
-                    print(f"LLM repair failed on attempt {attempt + 1}: {e}")
-                    break
+                active_client = self.llm_client
+            except LLMError as e:
+                print(f"LLM generation failed: {e}")
+                if self.fallback_llm_client:
+                    print(f"Trying fallback model ({self.fallback_llm_client.model})...")
+                    try:
+                        params = self.fallback_llm_client.generate_message_params(
+                            theme=theme, level=level, used_phrases=used_phrases
+                        )
+                        active_client = self.fallback_llm_client
+                    except LLMError as e2:
+                        print(f"Fallback LLM also failed: {e2}")
 
-        return None, validation_errors, False
+            if params is None:
+                return None, ["LLM unavailable — message not sent"], False
+
+            # Step 2: validate and repair (up to 2 repair attempts)
+            max_retries = 2
+            validation_errors = []
+            for attempt in range(max_retries + 1):
+                try:
+                    validate_template_params(params)
+                    break
+                except ValidationError as e:
+                    validation_errors = e.errors
+                    print(
+                        f"Validation failed (attempt {attempt + 1}/{max_retries + 1}): {validation_errors}"
+                    )
+                    if attempt >= max_retries:
+                        return None, validation_errors, False
+                    try:
+                        params = active_client.generate_repair_message_params(
+                            previous_output=params,
+                            validation_errors=validation_errors,
+                            theme=theme,
+                            level=level,
+                        )
+                    except LLMError as e:
+                        print(f"LLM repair failed on attempt {attempt + 1}: {e}")
+                        return None, validation_errors, False
+
+            # Step 3: check uniqueness against past phrases
+            word_phrase = params.get("word_phrase", "")
+            if word_phrase.lower() not in used_phrases_set:
+                return params, [], False
+
+            print(
+                f"Duplicate word_phrase '{word_phrase}' detected "
+                f"(unique attempt {unique_attempt + 1}/{max_unique_retries + 1}), retrying..."
+            )
+
+        logger.warning(
+            "Could not generate a unique word_phrase for level '%s' after %d attempts",
+            level,
+            max_unique_retries + 1,
+        )
+        return None, [f"Could not generate a unique word/phrase for level '{level}' after {max_unique_retries + 1} attempts"], False
 
     def _get_recipients(self) -> List[Dict]:
         """Return a list of recipient dicts with phone_number, first_name, english_level."""
@@ -420,17 +443,29 @@ class WordOfDayService:
         self,
         theme: str,
         level: str,
+        db_session=None,
     ) -> Dict:
         """
         Generate and validate a message for one level without sending.
+
+        Args:
+            db_session: Optional DB session for uniqueness checking. When provided,
+                        the last 90 used word/phrases for this level are fetched and
+                        passed to the LLM as an avoidance list.
 
         Returns:
             Dict with valid, template_params, formatted_message, and validation_errors
         """
         from app.integrations.wasender_client import format_template_params_as_text
 
+        session = db_session or self.db_session
+        used_phrases = []
+        if session:
+            from app.repositories.message import MessageRepository
+            used_phrases = MessageRepository(session).get_past_word_phrases(level)
+
         params, validation_errors, used_fallback = self._generate_and_validate(
-            theme=theme, level=level
+            theme=theme, level=level, used_phrases=used_phrases
         )
         if params is None:
             return {

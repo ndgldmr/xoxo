@@ -126,7 +126,7 @@ async def generate_daily_messages(
     results = []
 
     for level in target_levels:
-        result = service.generate_message(theme=theme, level=level)
+        result = service.generate_message(theme=theme, level=level, db_session=db)
 
         if result["valid"]:
             repo.upsert(

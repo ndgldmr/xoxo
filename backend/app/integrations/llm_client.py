@@ -261,6 +261,7 @@ Return ONLY the corrected final message with the exact structure. No extra comme
         theme: str = "daily life",
         level: str = "beginner",
         temperature: float = 0.7,
+        used_phrases: Optional[list[str]] = None,
     ) -> dict:
         """
         Generate Word of the Day template parameters (6 separate fields).
@@ -282,7 +283,12 @@ Return ONLY the corrected final message with the exact structure. No extra comme
         Raises:
             LLMError: If API call fails or response is invalid
         """
-        prompt = f"""{self.TEMPLATE_PARAMS_PROMPT}
+        avoidance = ""
+        if used_phrases:
+            phrases_list = ", ".join(f'"{p}"' for p in used_phrases)
+            avoidance = f"\n\nAlready used — do NOT repeat any of these:\n{phrases_list}"
+
+        prompt = f"""{self.TEMPLATE_PARAMS_PROMPT}{avoidance}
 
 Theme: {theme}
 Level: {level}

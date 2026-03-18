@@ -66,3 +66,23 @@ class MessageRepository:
             .filter(Message.date == date, Message.level == level)
             .first()
         )
+
+    def get_past_word_phrases(self, level: str, limit: int = 90) -> List[str]:
+        """Return the most recent word_phrase values for a given level.
+
+        Used to build an avoidance list for LLM generation so the same
+        word/phrase is not repeated. Capped at `limit` entries to keep
+        prompt size bounded.
+        """
+        rows = (
+            self.session.query(Message.template_params)
+            .filter(Message.level == level)
+            .order_by(Message.date.desc())
+            .limit(limit)
+            .all()
+        )
+        return [
+            row.template_params["word_phrase"]
+            for row in rows
+            if row.template_params and "word_phrase" in row.template_params
+        ]
