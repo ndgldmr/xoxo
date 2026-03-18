@@ -74,6 +74,7 @@ def test_happy_path_generates_validates_and_sends(
     mock_llm_client.generate_message_params.assert_called_once_with(
         theme="greetings",
         level="beginner",
+        used_phrases=None,
     )
 
     # Check WaSender was called
@@ -186,7 +187,7 @@ def test_multi_recipient_generates_content_per_level(
     beginner_params = {**VALID_PARAMS, "word_phrase": "Good morning"}
     intermediate_params = {**VALID_PARAMS, "word_phrase": "Nevertheless"}
 
-    def generate_by_level(theme, level):
+    def generate_by_level(theme, level, used_phrases=None):
         return beginner_params if level == "beginner" else intermediate_params
 
     mock_llm_client.generate_message_params.side_effect = generate_by_level
@@ -202,13 +203,17 @@ def test_multi_recipient_generates_content_per_level(
     intermediate.first_name = "Bruno"
     intermediate.english_level = "intermediate"
 
-    mock_repo = MagicMock()
-    mock_repo.get_active_subscribers.return_value = [beginner, intermediate]
+    mock_student_repo = MagicMock()
+    mock_student_repo.get_active_subscribers.return_value = [beginner, intermediate]
+
+    mock_msg_repo = MagicMock()
+    mock_msg_repo.get_past_word_phrases.return_value = []
 
     mock_db = MagicMock()
 
-    with patch("app.repositories.student.StudentRepository", return_value=mock_repo), \
-         patch.object(WordOfDayService, "_load_stored_messages", return_value={}):
+    with patch("app.repositories.student.StudentRepository", return_value=mock_student_repo), \
+         patch.object(WordOfDayService, "_load_stored_messages", return_value={}), \
+         patch("app.repositories.message.MessageRepository", return_value=mock_msg_repo):
         svc = WordOfDayService(
             llm_client=mock_llm_client,
             whatsapp_client=mock_wasender_client,
@@ -290,13 +295,18 @@ def test_send_job_falls_back_to_llm_when_no_stored_message(
     student.first_name = "Ana"
     student.english_level = "beginner"
 
-    mock_repo = MagicMock()
-    mock_repo.get_active_subscribers.return_value = [student]
+    mock_student_repo = MagicMock()
+    mock_student_repo.get_active_subscribers.return_value = [student]
+
+    mock_msg_repo = MagicMock()
+    mock_msg_repo.get_past_word_phrases.return_value = []
+
     mock_db = MagicMock()
 
     # No stored messages — empty dict
-    with patch("app.repositories.student.StudentRepository", return_value=mock_repo), \
-         patch.object(WordOfDayService, "_load_stored_messages", return_value={}):
+    with patch("app.repositories.student.StudentRepository", return_value=mock_student_repo), \
+         patch.object(WordOfDayService, "_load_stored_messages", return_value={}), \
+         patch("app.repositories.message.MessageRepository", return_value=mock_msg_repo):
         svc = WordOfDayService(
             llm_client=mock_llm_client,
             whatsapp_client=mock_wasender_client,
@@ -309,7 +319,7 @@ def test_send_job_falls_back_to_llm_when_no_stored_message(
     assert result["sent_count"] == 1
     # LLM MUST be called as fallback
     mock_llm_client.generate_message_params.assert_called_once_with(
-        theme="greetings", level="beginner"
+        theme="greetings", level="beginner", used_phrases=[]
     )
 
 
@@ -371,3 +381,86 @@ def test_no_send_when_both_llms_fail(
     mock_wasender_client.send_template_message.assert_not_called()
     primary.generate_message_params.assert_called_once()
     fallback.generate_message_params.assert_called_once()
+
+
+def test_duplicate_word_phrase_triggers_retry(
+    mock_llm_client, mock_wasender_client, temp_audit_log
+):
+    """When LLM returns a phrase already in history, it retries and sends the new phrase."""
+    from unittest.mock import MagicMock, patch
+
+    new_params = {**VALID_PARAMS, "word_phrase": "You're welcome"}
+    call_count = [0]
+
+    def generate_params(theme, level, used_phrases=None):
+        call_count[0] += 1
+        return VALID_PARAMS if call_count[0] == 1 else new_params
+
+    mock_llm_client.generate_message_params.side_effect = generate_params
+
+    student = MagicMock()
+    student.phone_number = "+5511111111111"
+    student.first_name = "Ana"
+    student.english_level = "beginner"
+
+    mock_student_repo = MagicMock()
+    mock_student_repo.get_active_subscribers.return_value = [student]
+
+    mock_msg_repo = MagicMock()
+    mock_msg_repo.get_past_word_phrases.return_value = ["Thank you"]  # already used
+
+    mock_db = MagicMock()
+
+    with patch("app.repositories.student.StudentRepository", return_value=mock_student_repo), \
+         patch.object(WordOfDayService, "_load_stored_messages", return_value={}), \
+         patch("app.repositories.message.MessageRepository", return_value=mock_msg_repo):
+        svc = WordOfDayService(
+            llm_client=mock_llm_client,
+            whatsapp_client=mock_wasender_client,
+            audit_log=temp_audit_log,
+            db_session=mock_db,
+        )
+        result = svc.run_daily_job(theme="greetings")
+
+    assert result["status"] == "success"
+    assert result["sent_count"] == 1
+    assert mock_llm_client.generate_message_params.call_count == 2
+
+
+def test_duplicate_word_phrase_fails_after_max_retries(
+    mock_llm_client, mock_wasender_client, temp_audit_log
+):
+    """When all retry attempts produce a duplicate phrase, nothing is sent."""
+    from unittest.mock import MagicMock, patch
+
+    # LLM always returns "Thank you", which is already in history
+    mock_llm_client.generate_message_params.return_value = VALID_PARAMS
+
+    student = MagicMock()
+    student.phone_number = "+5511111111111"
+    student.first_name = "Ana"
+    student.english_level = "beginner"
+
+    mock_student_repo = MagicMock()
+    mock_student_repo.get_active_subscribers.return_value = [student]
+
+    mock_msg_repo = MagicMock()
+    mock_msg_repo.get_past_word_phrases.return_value = ["Thank you"]
+
+    mock_db = MagicMock()
+
+    with patch("app.repositories.student.StudentRepository", return_value=mock_student_repo), \
+         patch.object(WordOfDayService, "_load_stored_messages", return_value={}), \
+         patch("app.repositories.message.MessageRepository", return_value=mock_msg_repo):
+        svc = WordOfDayService(
+            llm_client=mock_llm_client,
+            whatsapp_client=mock_wasender_client,
+            audit_log=temp_audit_log,
+            db_session=mock_db,
+        )
+        result = svc.run_daily_job(theme="greetings")
+
+    assert result["status"] == "error"
+    assert result["sent_count"] == 0
+    assert mock_llm_client.generate_message_params.call_count == 3  # initial + 2 retries
+    mock_wasender_client.send_template_message.assert_not_called()

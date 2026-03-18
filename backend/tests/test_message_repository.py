@@ -110,3 +110,39 @@ class TestMessageRepositoryGetByDateAndLevel:
     def test_returns_none_for_missing_date(self, repo):
         repo.upsert(TODAY, "beginner", "travel", PARAMS, FORMATTED)
         assert repo.get_by_date_and_level(YESTERDAY, "beginner") is None
+
+
+class TestGetPastWordPhrases:
+    def test_returns_empty_when_no_messages(self, repo):
+        assert repo.get_past_word_phrases("beginner") == []
+
+    def test_returns_word_phrases_for_level(self, repo):
+        repo.upsert(TODAY, "beginner", "travel", PARAMS, FORMATTED)
+        result = repo.get_past_word_phrases("beginner")
+        assert result == ["Thank you"]
+
+    def test_excludes_other_levels(self, repo):
+        repo.upsert(TODAY, "beginner", "travel", PARAMS, FORMATTED)
+        intermediate_params = {**PARAMS, "word_phrase": "Nevertheless"}
+        repo.upsert(TODAY, "intermediate", "travel", intermediate_params, FORMATTED)
+
+        beginner_result = repo.get_past_word_phrases("beginner")
+        assert beginner_result == ["Thank you"]
+        assert "Nevertheless" not in beginner_result
+
+    def test_ordered_most_recent_first(self, repo):
+        older_params = {**PARAMS, "word_phrase": "Excuse me"}
+        repo.upsert(YESTERDAY, "beginner", "travel", older_params, FORMATTED)
+        repo.upsert(TODAY, "beginner", "travel", PARAMS, FORMATTED)
+
+        result = repo.get_past_word_phrases("beginner")
+        assert result == ["Thank you", "Excuse me"]
+
+    def test_respects_limit(self, repo):
+        for i in range(5):
+            day = TODAY - datetime.timedelta(days=i)
+            params = {**PARAMS, "word_phrase": f"Phrase {i}"}
+            repo.upsert(day, "beginner", "travel", params, FORMATTED)
+
+        result = repo.get_past_word_phrases("beginner", limit=3)
+        assert len(result) == 3

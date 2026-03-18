@@ -39,6 +39,7 @@ WhatsApp "English Word/Phrase of the Day" service for Brazilian Portuguese speak
 - **Pre-Generated Message Store** — Daily messages are generated at midnight and stored in the database; the send job reads from the store rather than calling the LLM at send time, ensuring all students receive identical, validated content
 - **Message Preview** — Admins can see the exact WhatsApp message queued for each level in the Schedule tab, and regenerate any level on demand
 - **Strict Validation** — All 6 message fields are validated for format, length, language, and content rules before sending
+- **Unique Message Enforcement** — Before generating (whether via the generate job or the send job fallback), the last 90 days of used words/phrases (per level) are fetched from the database and injected into the LLM prompt as an avoidance list. After generation, the result is checked against history; if a duplicate is detected, generation retries up to 2 more times. If all attempts produce a duplicate, no message is stored or sent
 - **Auto-Retry with Repair** — If validation fails, automatically retries with a repair prompt (up to 2 retries)
 - **Resilient LLM Pipeline** — On 503 errors, automatically retries the primary model (10s then 30s); if still unavailable, falls back to `gemini-2.0-flash-lite`; if both fail, no message is sent rather than delivering stale content
 - **Welcome Message** — When a student is added with `whatsapp_messages: true`, a Portuguese welcome WhatsApp message is sent to them automatically
@@ -100,14 +101,28 @@ Trigger: GCP Cloud Scheduler (xoxo-daily-generate) → POST /messages/generate
        beginner  intermediate   advanced
           │            │            │
           ▼            ▼            ▼
+      Fetch past    Fetch past   Fetch past
+      90 phrases    90 phrases   90 phrases
+      (this level)  (this level) (this level)
+          │            │            │
+          ▼            ▼            ▼
       Generate      Generate     Generate
       params        params       params
       via LLM       via LLM      via LLM
+      (avoidance    (avoidance   (avoidance
+       list in       list in      list in
+       prompt)       prompt)      prompt)
           │            │            │
           ▼            ▼            ▼
        Validate     Validate     Validate
        (retry/      (retry/      (retry/
        fallback)    fallback)    fallback)
+          │            │            │
+          ▼            ▼            ▼
+       Check        Check        Check
+       uniqueness   uniqueness   uniqueness
+       (retry up    (retry up    (retry up
+        to 2x)       to 2x)       to 2x)
           │            │            │
           └────────────┼────────────┘
                        │
@@ -1282,6 +1297,15 @@ All 6 parameters are validated on every send:
 3. **Attempt 2** — If invalid, regenerate using a repair prompt that includes the specific validation errors
 4. **Attempt 3** — Retry repair once more if still invalid
 5. If all 3 attempts fail validation, **no message is sent**
+
+**Uniqueness enforcement**
+
+Before each generation attempt, the last 90 days of `word_phrase` values for that level are fetched from the database and appended to the LLM prompt as an avoidance list (keeping the prompt size bounded regardless of how long the service has been running). After a successful validation pass, the result is checked against those 90 values:
+
+1. **Attempt 1** — Generate with avoidance list in prompt
+2. If the returned `word_phrase` is already in history, **retry** (avoidance list still in prompt)
+3. **Attempt 3** — Retry once more if still a duplicate
+4. If all 3 attempts produce a duplicate, **no message is sent** and the error is surfaced in the API response
 
 ---
 

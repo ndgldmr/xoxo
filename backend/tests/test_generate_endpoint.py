@@ -134,6 +134,23 @@ class TestGenerateEndpoint:
         assert all(not r["valid"] for r in body["results"])
         mock_repo.upsert.assert_not_called()
 
+    def test_db_session_passed_to_generate_message_for_uniqueness_check(self, http_client):
+        """The DB session must be forwarded to generate_message so the uniqueness check has access to history."""
+        mock_db, mock_repo = make_mock_db_and_repo()
+        app.dependency_overrides[get_db] = lambda: mock_db
+
+        mock_svc = make_mock_service()
+
+        with patch("app.api.routers.messages.get_preview_service", return_value=mock_svc), \
+             patch("app.api.routers.messages.MessageRepository", return_value=mock_repo), \
+             patch("app.api.routers.messages.get_gcp_scheduler_client", side_effect=Exception("no gcp")), \
+             patch("app.config.get_settings", return_value=MagicMock(gcp_project_id="")):
+            http_client.post("/messages/generate", json={"theme": "travel", "level": "beginner"})
+
+        mock_svc.generate_message.assert_called_once_with(
+            theme="travel", level="beginner", db_session=mock_db
+        )
+
 
 # ── GET /messages/today ───────────────────────────────────────────────────────
 
