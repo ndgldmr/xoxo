@@ -14,7 +14,7 @@ const TABS: { id: Tab; label: string }[] = [
 ]
 
 function hasStoredKey() {
-  return Boolean(sessionStorage.getItem("xoxo_api_key"))
+  return Boolean(sessionStorage.getItem("xoxo_jwt"))
 }
 
 export default function App() {
@@ -26,7 +26,7 @@ export default function App() {
   }
 
   function handleLogout() {
-    sessionStorage.removeItem("xoxo_api_key")
+    sessionStorage.removeItem("xoxo_jwt")
     setLoggedIn(false)
   }
 

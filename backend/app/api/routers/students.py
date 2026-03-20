@@ -2,10 +2,10 @@
 import logging
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, Security
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, verify_api_key, normalize_phone
+from app.api.deps import get_db, verify_jwt, normalize_phone
 from app.api.schemas import StudentCreate, StudentUpdate, StudentResponse
 from app.integrations.wasender_client import WaSenderClient
 from app.config import get_settings
@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/students", tags=["students"])
 
-_auth = [Security(verify_api_key)]
+_auth = [Depends(verify_jwt)]
 
 
 def _to_response(s) -> StudentResponse:

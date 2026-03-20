@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     # API Authentication
     api_key: str = ""  # Required in production
 
+    # JWT Authentication (human-facing routes)
+    jwt_secret_key: str = ""       # Must be set in production; empty = skip auth (like api_key)
+    jwt_algorithm: str = "HS256"
+    jwt_expire_hours: int = 8
+
     # GCP Cloud Scheduler (production-only; leave blank in local dev)
     gcp_project_id: str = ""
     gcp_location: str = ""          # e.g. "us-central1"

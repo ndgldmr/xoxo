@@ -17,6 +17,7 @@ WhatsApp "English Word/Phrase of the Day" service for Brazilian Portuguese speak
 - [Admin Dashboard](#admin-dashboard)
 - [Deploying to GCP](#deploying-to-gcp)
 - [API Reference](#api-reference)
+- [Admin Accounts](#admins-table-schema)
 - [Student Management](#student-management)
 - [Dashboard Stats](#dashboard-stats)
 - [CLI Reference](#cli-reference)
@@ -44,7 +45,8 @@ WhatsApp "English Word/Phrase of the Day" service for Brazilian Portuguese speak
 - **Resilient LLM Pipeline** — On 503 errors, automatically retries the primary model (10s then 30s); if still unavailable, falls back to `gemini-2.0-flash-lite`; if both fail, no message is sent rather than delivering stale content
 - **Welcome Message** — When a student is added with `whatsapp_messages: true`, a Portuguese welcome WhatsApp message is sent to them automatically
 - **Opt-Out / Opt-In** — Students send "STOP" or "START" via WhatsApp; the webhook updates the database and sends a PT-BR confirmation automatically
-- **API Authentication** — All sensitive endpoints require an `X-API-Key` header
+- **JWT Authentication** — Human-facing admin endpoints (student management, stats, schedule, broadcast, message preview) require a `Bearer` JWT token obtained via `POST /auth/login`. Machine-to-machine routes called by GCP Cloud Scheduler (`/send-word-of-day`, `/messages/generate`) continue to use the simpler `X-API-Key` header
+- **Per-Admin Accounts** — Each admin logs in with an individual email and password; tokens expire after 8 hours. The `create-admin` CLI command creates admin accounts without requiring a running server
 - **Webhook Signature Verification** — WaSenderAPI webhook requests are verified using a shared secret via `X-Webhook-Signature`
 - **Idempotency** — Won't send duplicate messages on the same day (unless forced)
 - **Audit Logging** — JSONL-based audit trail of every send with full per-student tracking
@@ -241,7 +243,10 @@ cp .env.example .env
 | `WASENDER_API_KEY` | Yes | — | WaSenderAPI bearer token |
 | `WASENDER_WEBHOOK_SECRET` | Yes | — | Webhook secret from WaSenderAPI dashboard |
 | `DATABASE_URL` | Yes | — | PostgreSQL connection string |
-| `API_KEY` | Yes | — | Secret key required by all protected API endpoints |
+| `API_KEY` | Yes | — | Secret key for machine-to-machine endpoints called by GCP Cloud Scheduler (`/send-word-of-day`, `/messages/generate`) |
+| `JWT_SECRET_KEY` | Yes | — | Secret used to sign admin JWTs. Generate with: `python -c "import secrets; print(secrets.token_hex(32))"` |
+| `JWT_ALGORITHM` | No | `HS256` | JWT signing algorithm |
+| `JWT_EXPIRE_HOURS` | No | `8` | How long an issued token stays valid |
 | `GCP_PROJECT_ID` | No | — | GCP project ID (production only, for schedule management) |
 | `GCP_LOCATION` | No | — | GCP region where the Cloud Scheduler jobs live (e.g. `us-central1`) |
 | `GCP_SCHEDULER_JOB_ID` | No | — | Send job name (e.g. `xoxo-daily-send`) |
@@ -268,9 +273,15 @@ WASENDER_WEBHOOK_SECRET=your_webhook_secret
 # Database (Supabase PostgreSQL)
 DATABASE_URL=postgresql://postgres:[PASSWORD]@db.[PROJECT-REF].supabase.co:5432/postgres
 
-# API Authentication
+# Machine-to-machine Authentication (GCP Cloud Scheduler routes)
 # Generate with: python -c "import secrets; print(secrets.token_hex(32))"
 API_KEY=your_generated_api_key
+
+# JWT Authentication (human-facing admin routes)
+# Generate with: python -c "import secrets; print(secrets.token_hex(32))"
+JWT_SECRET_KEY=your_generated_jwt_secret
+JWT_ALGORITHM=HS256
+JWT_EXPIRE_HOURS=8
 
 # GCP Cloud Scheduler (production-only; leave blank for local dev)
 GCP_PROJECT_ID=your_gcp_project_id
@@ -304,7 +315,7 @@ Expected output:
 ```
 Initializing database...
 ✓ Database initialized successfully!
-  Tables created: students, messages
+  Tables created: students, messages, admins
 ```
 
 > Tables are also created automatically on app startup (via the FastAPI lifespan event), so `init_db.py` is mainly useful for local setup before the server has run.
@@ -338,6 +349,18 @@ Pre-generated daily messages are stored here. The send job reads from this table
 | `updated_at` | `TIMESTAMP WITH TIME ZONE` | Auto-updated on change |
 
 The `(date, level)` pair is unique — re-generating a level upserts the row.
+
+### Admins Table Schema
+
+Admin accounts for the dashboard. Created via the `create-admin` CLI command.
+
+| Column | Type | Description |
+|---|---|---|
+| `id` | `INTEGER` PK | Auto-increment primary key |
+| `email` | `VARCHAR(255)` unique | Admin email address |
+| `hashed_password` | `VARCHAR(255)` | bcrypt hash of the password |
+| `created_at` | `TIMESTAMP WITH TIME ZONE` | Auto-set on creation |
+| `updated_at` | `TIMESTAMP WITH TIME ZONE` | Auto-updated on change |
 
 ---
 
@@ -407,7 +430,7 @@ The dashboard opens at `http://localhost:5173`.
 
 ### Login
 
-The dashboard has a login screen. Enter your `API_KEY` (the same value as `API_KEY` in the backend `.env`). The key is verified against the live backend and stored in `sessionStorage` for the duration of the browser tab — it is cleared on logout or when the tab is closed.
+The dashboard has a login screen. Enter your admin email and password (created with the `create-admin` CLI command — see [CLI Reference](#cli-reference)). On success, the backend returns a JWT that is stored in `sessionStorage` for the duration of the browser tab — it is cleared on logout or when the tab is closed. Tokens expire after 8 hours (configurable via `JWT_EXPIRE_HOURS`).
 
 ### Students tab
 
@@ -509,13 +532,17 @@ GCP_PROJECT_ID=my-other-project ./deploy.sh
 
 ### Authentication
 
-All endpoints except `GET /`, `GET /health`, and `POST /webhook/whatsapp` require an `X-API-Key` header:
+The API uses two different auth mechanisms depending on the caller:
 
-```
-X-API-Key: your_api_key
-```
+| Auth type | Header | Endpoints |
+|---|---|---|
+| **JWT Bearer** | `Authorization: Bearer <token>` | All human-facing admin routes: `/students/*`, `/broadcast`, `/messages/today`, `/schedule`, `/stats`, `/audit-log` |
+| **API Key** | `X-API-Key: <key>` | Machine-to-machine routes called by GCP Scheduler: `/send-word-of-day`, `/messages/generate` |
+| **None** | — | `GET /`, `GET /health`, `POST /auth/login`, `POST /webhook/whatsapp` |
 
-Requests missing or sending the wrong key receive a `401 Unauthorized` response.
+**Getting a JWT:** call `POST /auth/login` with your admin email and password (created via the `create-admin` CLI). The response includes an `access_token` valid for 8 hours (configurable).
+
+**Local development:** both auth mechanisms are skipped if the corresponding env var is unset (`JWT_SECRET_KEY` for JWT, `API_KEY` for API key).
 
 ---
 
@@ -567,9 +594,46 @@ Returns configuration status. No authentication required.
 
 ---
 
+### `POST /auth/login`
+
+Authenticates an admin and returns a JWT access token. No authentication required.
+
+**Request body**
+```json
+{
+  "email": "admin@xoxo.com",
+  "password": "your-password"
+}
+```
+
+**Response**
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "token_type": "bearer"
+}
+```
+
+Returns `401 Unauthorized` if the email is not found or the password is wrong (same error message in both cases — the API does not reveal which).
+
+Use the `access_token` in subsequent requests:
+```
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+```
+
+**Example**
+```bash
+TOKEN=$(curl -s -X POST https://your-domain.com/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email": "admin@xoxo.com", "password": "your-password"}' \
+  | jq -r .access_token)
+```
+
+---
+
 ### `POST /send-word-of-day`
 
-Generates and sends a Word of the Day message to all active subscribers. **Requires `X-API-Key`.**
+Generates and sends a Word of the Day message to all active subscribers. **Requires `X-API-Key`** (called by GCP Scheduler).
 
 **Request body**
 ```json
@@ -637,7 +701,7 @@ curl -X POST https://your-domain.com/send-word-of-day \
 
 ### `POST /broadcast`
 
-Sends a custom message to all active, opted-in students. Optionally filters by English level. **Requires `X-API-Key`.**
+Sends a custom message to all active, opted-in students. Optionally filters by English level. **Requires Bearer JWT.**
 
 **Request body**
 ```json
@@ -664,7 +728,7 @@ Sends a custom message to all active, opted-in students. Optionally filters by E
 **Example**
 ```bash
 curl -X POST https://your-domain.com/broadcast \
-  -H "X-API-Key: your_api_key" \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"message": "No class this Monday!", "level": null}'
 ```
@@ -673,7 +737,7 @@ curl -X POST https://your-domain.com/broadcast \
 
 ### `GET /schedule`
 
-Returns the current schedule config read live from the GCP Cloud Scheduler job. **Requires `X-API-Key`.** Returns `503` if GCP env vars are not set.
+Returns the current schedule config read live from the GCP Cloud Scheduler job. **Requires Bearer JWT.** Returns `503` if GCP env vars are not set.
 
 **Response**
 ```json
@@ -687,14 +751,14 @@ Returns the current schedule config read live from the GCP Cloud Scheduler job. 
 **Example**
 ```bash
 curl https://your-domain.com/schedule \
-  -H "X-API-Key: your_api_key"
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 ---
 
 ### `PATCH /schedule`
 
-Updates the schedule config in the GCP Cloud Scheduler job. All fields are optional — only provided fields are changed. **Requires `X-API-Key`.** Returns `503` if GCP env vars are not set.
+Updates the schedule config in the GCP Cloud Scheduler job. All fields are optional — only provided fields are changed. **Requires Bearer JWT.** Returns `503` if GCP env vars are not set.
 
 **Request body** (all fields optional)
 ```json
@@ -716,7 +780,7 @@ Returns the full updated `ScheduleConfigResponse` after applying changes. If `th
 **Example** — update only the send time:
 ```bash
 curl -X PATCH https://your-domain.com/schedule \
-  -H "X-API-Key: your_api_key" \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"send_time": "09:00"}'
 ```
@@ -725,7 +789,7 @@ curl -X PATCH https://your-domain.com/schedule \
 
 ### `POST /messages/generate`
 
-Pre-generates and stores today's Word of the Day message(s) in the database. Called automatically at midnight by the `xoxo-daily-generate` Cloud Scheduler job; also available for admins to trigger regeneration on demand. **Requires `X-API-Key`.**
+Pre-generates and stores today's Word of the Day message(s) in the database. Called automatically at midnight by the `xoxo-daily-generate` Cloud Scheduler job; also available for admins to trigger regeneration on demand. **Requires `X-API-Key`** (called by GCP Scheduler).
 
 **Request body**
 ```json
@@ -777,7 +841,7 @@ curl -X POST https://your-domain.com/messages/generate \
 
 ### `GET /messages/today`
 
-Returns the stored messages for today. **Requires `X-API-Key`.**
+Returns the stored messages for today. **Requires Bearer JWT.**
 
 **Response**
 ```json
@@ -805,14 +869,14 @@ Returns an empty `messages` array if no messages have been generated for today y
 **Example**
 ```bash
 curl https://your-domain.com/messages/today \
-  -H "X-API-Key: your_api_key"
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 ---
 
 ### `GET /students`
 
-Lists all students. **Requires `X-API-Key`.**
+Lists all students. **Requires Bearer JWT.**
 
 **Query parameters**
 
@@ -838,32 +902,32 @@ Lists all students. **Requires `X-API-Key`.**
 ```bash
 # Active students only
 curl https://your-domain.com/students \
-  -H "X-API-Key: your_api_key"
+  -H "Authorization: Bearer $TOKEN"
 
 # All students including removed
 curl "https://your-domain.com/students?include_inactive=true" \
-  -H "X-API-Key: your_api_key"
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 ---
 
 ### `GET /students/{phone_number}`
 
-Returns a single student by phone number. **Requires `X-API-Key`.**
+Returns a single student by phone number. **Requires Bearer JWT.**
 
 Returns `404 Not Found` if the student doesn't exist.
 
 **Example**
 ```bash
 curl "https://your-domain.com/students/%2B5511999999999" \
-  -H "X-API-Key: your_api_key"
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 ---
 
 ### `POST /students`
 
-Adds a new student. **Requires `X-API-Key`.**
+Adds a new student. **Requires Bearer JWT.**
 
 **Request body**
 ```json
@@ -897,7 +961,7 @@ If the welcome message fails (e.g. due to a transient WaSenderAPI error), the fa
 **Example**
 ```bash
 curl -X POST https://your-domain.com/students \
-  -H "X-API-Key: your_api_key" \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "phone_number": "+5511999999999",
@@ -912,7 +976,7 @@ curl -X POST https://your-domain.com/students \
 
 ### `PATCH /students/{phone_number}`
 
-Updates one or more fields for an existing student. All fields are optional — only provided fields are changed. **Requires `X-API-Key`.**
+Updates one or more fields for an existing student. All fields are optional — only provided fields are changed. **Requires Bearer JWT.**
 
 **Request body** (all fields optional)
 ```json
@@ -929,7 +993,7 @@ Returns the updated student object, or `404 Not Found` if the student doesn't ex
 **Example** — update level only:
 ```bash
 curl -X PATCH "https://your-domain.com/students/+5511999999999" \
-  -H "X-API-Key: your_api_key" \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"english_level": "advanced"}'
 ```
@@ -938,42 +1002,42 @@ curl -X PATCH "https://your-domain.com/students/+5511999999999" \
 
 ### `POST /students/{phone_number}/deactivate`
 
-Soft-deletes a student — sets `is_active = false` so they no longer receive messages but remain in the database. **Requires `X-API-Key`.**
+Soft-deletes a student — sets `is_active = false` so they no longer receive messages but remain in the database. **Requires Bearer JWT.**
 
 Returns `200` with the updated student object, or `404 Not Found` if the student doesn't exist.
 
 **Example**
 ```bash
 curl -X POST "https://your-domain.com/students/%2B5511999999999/deactivate" \
-  -H "X-API-Key: your_api_key"
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 ---
 
 ### `POST /students/{phone_number}/reactivate`
 
-Re-enables a previously deactivated student — sets `is_active = true`. **Requires `X-API-Key`.**
+Re-enables a previously deactivated student — sets `is_active = true`. **Requires Bearer JWT.**
 
 Returns `200` with the updated student object, or `404 Not Found` if the student doesn't exist.
 
 **Example**
 ```bash
 curl -X POST "https://your-domain.com/students/%2B5511999999999/reactivate" \
-  -H "X-API-Key: your_api_key"
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 ---
 
 ### `DELETE /students/{phone_number}`
 
-Hard-deletes a student by phone number. **Requires `X-API-Key`.**
+Hard-deletes a student by phone number. **Requires Bearer JWT.**
 
 Returns `204 No Content` on success, or `404 Not Found` if the student doesn't exist.
 
 **Example**
 ```bash
 curl -X DELETE "https://your-domain.com/students/+5511999999999" \
-  -H "X-API-Key: your_api_key"
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 ---
@@ -998,7 +1062,7 @@ This endpoint should only be called by WaSenderAPI — you do not need to call i
 
 ### `GET /stats`
 
-Returns aggregate dashboard statistics. **Requires `X-API-Key`.**
+Returns aggregate dashboard statistics. **Requires Bearer JWT.**
 
 **Response**
 ```json
@@ -1016,14 +1080,14 @@ Returns aggregate dashboard statistics. **Requires `X-API-Key`.**
 **Example**
 ```bash
 curl https://your-domain.com/stats \
-  -H "X-API-Key: your_api_key"
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 ---
 
 ### `GET /audit-log`
 
-Returns paginated audit log entries with optional filtering. **Requires `X-API-Key`.**
+Returns paginated audit log entries with optional filtering. **Requires Bearer JWT.**
 
 **Query parameters**
 
@@ -1038,11 +1102,11 @@ Returns paginated audit log entries with optional filtering. **Requires `X-API-K
 ```bash
 # All entries for today
 curl "https://your-domain.com/audit-log?date_str=2026-02-20" \
-  -H "X-API-Key: your_api_key"
+  -H "Authorization: Bearer $TOKEN"
 
 # A specific student's history
 curl "https://your-domain.com/audit-log?phone_number=%2B5511999999999&limit=10" \
-  -H "X-API-Key: your_api_key"
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 ---
@@ -1094,7 +1158,21 @@ python scripts/manage_students.py opt-out --phone "+5511999999999"
 
 ## CLI Reference
 
-The main CLI (`python -m app.main`) is used for sending and previewing messages.
+The main CLI (`python -m app.main`) is used for sending, previewing messages, and managing admin accounts.
+
+### Create Admin
+
+Creates a new admin account in the database. Run this before starting the server for the first time — it prompts for a password securely (input is hidden).
+
+```bash
+python -m app.main create-admin --email admin@xoxo.com
+# Password: (hidden input)
+# Admin 'admin@xoxo.com' created successfully.
+```
+
+If the email already exists, an error is printed and the command exits with code 1. `JWT_SECRET_KEY` does not need to be set to run this command — it only writes to the database.
+
+> **First deploy checklist:** after deploying, SSH into Cloud Run or run this locally against your production `DATABASE_URL` to create the initial admin before anyone tries to log in.
 
 ### Health Check
 
@@ -1174,11 +1252,11 @@ Both jobs are created/updated by `deploy.sh`. You can update the send schedule (
 
 ```bash
 # View current schedule
-curl https://your-domain.com/schedule -H "X-API-Key: your_api_key"
+curl https://your-domain.com/schedule -H "Authorization: Bearer $TOKEN"
 
 # Change send time to 9 AM
 curl -X PATCH https://your-domain.com/schedule \
-  -H "X-API-Key: your_api_key" \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"send_time": "09:00"}'
 ```
@@ -1372,18 +1450,20 @@ pytest --cov=app tests/
 ```
 backend/
 ├── app/
-│   ├── main.py                     # CLI entry point (send, preview, health)
-│   ├── config.py                   # Environment variable configuration
+│   ├── main.py                     # CLI entry point (send, preview, health, create-admin)
+│   ├── config.py                   # Environment variable configuration (incl. JWT settings)
+│   ├── security.py                 # Password hashing and JWT creation/verification (pure functions)
 │   ├── api/
 │   │   ├── routes.py               # FastAPI app factory and router registration
-│   │   ├── deps.py                 # Shared FastAPI dependencies (auth, DB, GCP client)
-│   │   ├── schemas.py              # Shared Pydantic request/response models
+│   │   ├── deps.py                 # Shared FastAPI dependencies (verify_api_key, verify_jwt, DB, GCP client)
+│   │   ├── schemas.py              # Shared Pydantic request/response models (incl. LoginRequest, TokenResponse)
 │   │   ├── webhook_routes.py       # Webhook handler (STOP/START opt-outs)
 │   │   └── routers/
-│   │       ├── students.py         # Student CRUD endpoints
-│   │       ├── messages.py         # POST /send-word-of-day, POST /broadcast, POST /messages/generate, GET /messages/today
-│   │       ├── admin.py            # GET /health, GET /stats, GET /audit-log
-│   │       └── schedule.py         # GET /schedule, PATCH /schedule (syncs both GCP jobs)
+│   │       ├── auth.py             # POST /auth/login — issues JWT tokens
+│   │       ├── students.py         # Student CRUD endpoints (JWT-protected)
+│   │       ├── messages.py         # POST /send-word-of-day (API key), POST /broadcast (JWT), POST /messages/generate (API key), GET /messages/today (JWT)
+│   │       ├── admin.py            # GET /stats, GET /audit-log (JWT-protected)
+│   │       └── schedule.py         # GET /schedule, PATCH /schedule (JWT-protected, syncs both GCP jobs)
 │   ├── services/
 │   │   └── word_of_day_service.py  # Orchestration: generate → validate → send
 │   ├── domain/
@@ -1400,10 +1480,12 @@ backend/
 │   │   ├── session.py              # Database engine and session management
 │   │   └── models/
 │   │       ├── student.py          # Student ORM model
-│   │       └── message.py          # Message ORM model (pre-generated daily messages)
+│   │       ├── message.py          # Message ORM model (pre-generated daily messages)
+│   │       └── admin.py            # Admin ORM model (email + hashed_password)
 │   └── repositories/
 │       ├── student.py              # Student CRUD operations
-│       └── message.py              # Message upsert and lookup by date/level
+│       ├── message.py              # Message upsert and lookup by date/level
+│       └── admin.py                # Admin lookup and creation
 ├── scripts/
 │   ├── init_db.py                  # Create all database tables
 │   └── manage_students.py          # Student management CLI (add, list, remove, opt-out)
@@ -1414,20 +1496,21 @@ backend/
 │   ├── test_enrollment.py          # Phone normalization, welcome message, and POST /students tests
 │   ├── test_broadcast.py           # POST /broadcast endpoint tests
 │   ├── test_message_repository.py  # MessageRepository unit tests (SQLite in-memory)
-│   └── test_generate_endpoint.py   # POST /messages/generate and GET /messages/today tests
+│   ├── test_generate_endpoint.py   # POST /messages/generate and GET /messages/today tests
+│   └── test_auth.py                # POST /auth/login and JWT-protected route enforcement tests
 ├── Dockerfile
 └── pyproject.toml
 
 frontend/
 ├── src/
 │   ├── api/
-│   │   ├── client.ts               # Base fetch wrapper (attaches X-API-Key, throws on non-2xx)
+│   │   ├── client.ts               # Base fetch wrapper (attaches Authorization: Bearer JWT, throws on non-2xx; exports login())
 │   │   ├── students.ts             # Typed functions for all student endpoints
 │   │   ├── schedule.ts             # Typed functions for GET/PATCH /schedule
 │   │   └── messages.ts             # Typed functions for POST /broadcast, POST /messages/generate, GET /messages/today
 │   ├── components/
 │   │   ├── ui/                     # shadcn/ui primitives (Button, Table, Dialog, etc.)
-│   │   ├── LoginScreen.tsx         # API key entry form
+│   │   ├── LoginScreen.tsx         # Email + password login form
 │   │   ├── StudentsTab.tsx         # Student table with search, filter, and CRUD actions
 │   │   ├── ScheduleTab.tsx         # Schedule config form + Today's Messages preview with per-level dialogs
 │   │   ├── AnnouncementTab.tsx     # Broadcast message form (message, level filter)
@@ -1495,9 +1578,16 @@ gcloud auth application-default login
 
 ### API returning 401
 
-- Confirm you are passing the `X-API-Key` header with the correct value
-- The value must match `API_KEY` in your `.env`
-- The `/health`, `/`, and `/webhook/whatsapp` endpoints do not require this header
+**Human-facing admin routes** (`/students`, `/broadcast`, `/messages/today`, `/schedule`, `/stats`, `/audit-log`):
+- These require a `Authorization: Bearer <token>` header, not `X-API-Key`
+- Get a token by calling `POST /auth/login` with your admin email and password
+- Tokens expire after 8 hours — log in again to get a fresh one
+- If `JWT_SECRET_KEY` is not set, auth is skipped entirely (dev mode)
+
+**Machine-to-machine routes** (`/send-word-of-day`, `/messages/generate`):
+- These require an `X-API-Key` header matching `API_KEY` in your `.env`
+
+**No auth required:** `/`, `/health`, `/auth/login`, `/webhook/whatsapp`
 
 ---
 

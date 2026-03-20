@@ -142,6 +142,22 @@ class ScheduleConfigResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Auth schemas
+# ---------------------------------------------------------------------------
+
+class LoginRequest(BaseModel):
+    """Request body for POST /auth/login."""
+    email: str
+    password: str
+
+
+class TokenResponse(BaseModel):
+    """Response model for successful authentication."""
+    access_token: str
+    token_type: str = "bearer"
+
+
+# ---------------------------------------------------------------------------
 # Admin schemas
 # ---------------------------------------------------------------------------
 

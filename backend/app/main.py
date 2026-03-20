@@ -208,6 +208,31 @@ def cmd_preview(args):
     return 0 if result['valid'] else 1
 
 
+def cmd_create_admin(args):
+    """Create a new admin account."""
+    import getpass
+    from app.db.session import get_session, init_db
+    from app.repositories.admin import AdminRepository
+    from app.security import hash_password
+
+    init_db()
+
+    password = getpass.getpass("Password: ")
+    if not password:
+        print("Error: password cannot be empty.", file=sys.stderr)
+        return 1
+
+    with get_session() as session:
+        repo = AdminRepository(session)
+        if repo.get_by_email(args.email):
+            print(f"Error: admin '{args.email}' already exists.", file=sys.stderr)
+            return 1
+        repo.create(email=args.email, hashed_password=hash_password(password))
+
+    print(f"Admin '{args.email}' created successfully.")
+    return 0
+
+
 def main():
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
@@ -253,6 +278,11 @@ def main():
         help="Difficulty level (default: beginner)",
     )
     preview_parser.set_defaults(func=cmd_preview)
+
+    # create-admin command
+    create_admin_parser = subparsers.add_parser("create-admin", help="Create a new admin user")
+    create_admin_parser.add_argument("--email", required=True, help="Admin email address")
+    create_admin_parser.set_defaults(func=cmd_create_admin)
 
     args = parser.parse_args()
 
