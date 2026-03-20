@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
 
 from app.api.routes import app
-from app.api.deps import normalize_phone, get_db, verify_api_key
+from app.api.deps import normalize_phone, get_db, verify_api_key, verify_jwt
 from app.integrations.wasender_client import WaSenderClient
 
 
@@ -53,8 +53,9 @@ def mock_settings():
 
 @pytest.fixture(autouse=True)
 def clear_dependency_overrides():
-    """Bypass API key auth and clean up all overrides after each test."""
+    """Bypass auth and clean up all overrides after each test."""
     app.dependency_overrides[verify_api_key] = lambda: None
+    app.dependency_overrides[verify_jwt] = lambda: "test@xoxo.com"
     yield
     app.dependency_overrides.clear()
 

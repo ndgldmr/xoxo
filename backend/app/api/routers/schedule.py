@@ -4,11 +4,11 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.api.deps import get_gcp_scheduler_client, verify_api_key
+from app.api.deps import get_gcp_scheduler_client, verify_jwt
 from app.api.schemas import ScheduleConfigResponse, ScheduleConfigUpdate
 from app.integrations.gcp_scheduler import GCPSchedulerClient, GCPSchedulerError
 
-router = APIRouter(tags=["schedule"], dependencies=[Depends(verify_api_key)])
+router = APIRouter(tags=["schedule"], dependencies=[Depends(verify_jwt)])
 
 _TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 

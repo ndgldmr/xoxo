@@ -60,7 +60,7 @@ def init_db() -> None:
     """Initialize database by creating all tables."""
     from app.db.base import Base
     # Import all models to ensure they're registered with Base
-    from app.db.models import student, message  # noqa: F401
+    from app.db.models import student, message, admin  # noqa: F401
 
     engine = _get_engine()
     Base.metadata.create_all(bind=engine)

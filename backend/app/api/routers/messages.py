@@ -7,7 +7,7 @@ from typing import Annotated, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Security
 from sqlalchemy.orm import Session
 
-from app.api.deps import verify_api_key, get_service, get_preview_service, get_db, get_gcp_scheduler_client
+from app.api.deps import verify_api_key, verify_jwt, get_service, get_preview_service, get_db, get_gcp_scheduler_client
 from app.api.schemas import (
     SendRequest, SendResponse,
     BroadcastRequest, BroadcastResponse,
@@ -22,10 +22,11 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["messages"])
 
-_auth = [Security(verify_api_key)]
+_machine_auth = [Security(verify_api_key)]   # GCP Scheduler routes
+_human_auth = [Depends(verify_jwt)]          # Admin dashboard routes
 
 
-@router.post("/send-word-of-day", response_model=SendResponse, dependencies=_auth)
+@router.post("/send-word-of-day", response_model=SendResponse, dependencies=_machine_auth)
 async def send_word_of_day(request: SendRequest) -> SendResponse:
     """Generate and send a Word of the Day to all active subscribers."""
     service = get_service()
@@ -43,7 +44,7 @@ async def send_word_of_day(request: SendRequest) -> SendResponse:
             service.db_session.close()
 
 
-@router.post("/broadcast", response_model=BroadcastResponse, dependencies=_auth)
+@router.post("/broadcast", response_model=BroadcastResponse, dependencies=_human_auth)
 async def broadcast_message(request: BroadcastRequest) -> BroadcastResponse:
     """Send a custom message to all active WhatsApp subscribers, optionally filtered by level."""
     from app.config import get_settings
@@ -88,7 +89,7 @@ async def broadcast_message(request: BroadcastRequest) -> BroadcastResponse:
 
 
 
-@router.post("/messages/generate", response_model=GenerateResponse, dependencies=_auth)
+@router.post("/messages/generate", response_model=GenerateResponse, dependencies=_machine_auth)
 async def generate_daily_messages(
     request: GenerateRequest,
     db: Annotated[Session, Depends(get_db)],
@@ -148,7 +149,7 @@ async def generate_daily_messages(
     return GenerateResponse(date=today.isoformat(), results=results)
 
 
-@router.get("/messages/today", response_model=TodayMessagesResponse, dependencies=_auth)
+@router.get("/messages/today", response_model=TodayMessagesResponse, dependencies=_human_auth)
 async def get_today_messages(
     db: Annotated[Session, Depends(get_db)],
 ) -> TodayMessagesResponse:

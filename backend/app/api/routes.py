@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
+from app.api.routers.auth import router as auth_router
 from app.api.routers.students import router as students_router
 from app.api.routers.messages import router as messages_router
 from app.api.routers.admin import router as admin_router
@@ -36,6 +37,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth_router)
 app.include_router(students_router)
 app.include_router(messages_router)
 app.include_router(admin_router)

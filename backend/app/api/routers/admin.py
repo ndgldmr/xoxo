@@ -2,17 +2,17 @@
 from datetime import date
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, Security
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, get_audit_log, verify_api_key
+from app.api.deps import get_db, get_audit_log, verify_jwt
 from app.api.schemas import StatsResponse
 from app.logging.audit_log import AuditLog
 from app.repositories.student import StudentRepository
 
 router = APIRouter(tags=["admin"])
 
-_auth = [Security(verify_api_key)]
+_auth = [Depends(verify_jwt)]
 
 
 @router.get("/stats", response_model=StatsResponse, dependencies=_auth)

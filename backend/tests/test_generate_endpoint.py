@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api.routes import app
-from app.api.deps import verify_api_key, get_db
+from app.api.deps import verify_api_key, verify_jwt, get_db
 from app.db.models.message import LEVELS
 
 TODAY = datetime.date.today()
@@ -39,6 +39,7 @@ def http_client():
 @pytest.fixture(autouse=True)
 def clear_overrides():
     app.dependency_overrides[verify_api_key] = lambda: None
+    app.dependency_overrides[verify_jwt] = lambda: "test@xoxo.com"
     yield
     app.dependency_overrides.clear()
 

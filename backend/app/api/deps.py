@@ -3,8 +3,9 @@ import re
 import logging
 from typing import Generator, Optional
 
-from fastapi import HTTPException, Security
-from fastapi.security import APIKeyHeader
+from fastapi import Depends, HTTPException, Security
+from fastapi.security import APIKeyHeader, OAuth2PasswordBearer
+from jose import JWTError
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -18,6 +19,7 @@ from app.services.word_of_day_service import WordOfDayService
 logger = logging.getLogger(__name__)
 
 _api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+_oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)
 
 
 def normalize_phone(raw: str) -> str:
@@ -47,6 +49,20 @@ async def verify_api_key(api_key: str = Security(_api_key_header)) -> None:
         return
     if api_key != settings.api_key:
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
+
+
+async def verify_jwt(token: str = Depends(_oauth2_scheme)) -> str:
+    """Verify a Bearer JWT. Returns the admin email. Skipped if JWT_SECRET_KEY is not set."""
+    from app.security import decode_access_token
+    settings = get_settings()
+    if not settings.jwt_secret_key:
+        return "admin"  # Skip auth in dev (mirrors verify_api_key behavior)
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    try:
+        return decode_access_token(token, settings.jwt_secret_key, settings.jwt_algorithm)
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
 
 
 def get_db() -> Generator[Session, None, None]:
